@@ -1,0 +1,45 @@
+server:
+  port: ${SERVER_PORT:8084}
+
+pay:
+  environment: ${PAY_ENVIRONMENT:local}
+
+spring:
+  application:
+    name: pay-limit-management
+  profiles:
+    default: local
+  config:
+    import:
+      - optional:configserver:${CONFIG_SERVER_URL:http://pay-config:8080}
+      - optional:vault://
+  cloud:
+    config:
+      enabled: ${CONFIG_SERVER_ENABLED:false}
+      label: ${CONFIG_SERVER_LABEL:${pay.environment}}
+    vault:
+      enabled: ${VAULT_ENABLED:false}
+      kv:
+        backend: ${VAULT_KV_BACKEND:pay}
+        default-context: ""
+        application-name: ${VAULT_KV_CONTEXTS:}
+        profiles: []
+
+management:
+  endpoint:
+    health:
+      probes:
+        enabled: true
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus
+
+springdoc:
+  api-docs:
+    path: /v3/api-docs
+  swagger-ui:
+    path: /swagger-ui.html
+
+pay-limit-management:
+  service-name: ${PAY_LIMIT_MANAGEMENT_SERVICE_NAME:Limit Management}

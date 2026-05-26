@@ -1,0 +1,9 @@
+pay:
+  environment: local
+
+spring:
+  cloud:
+    config:
+      enabled: ${CONFIG_SERVER_ENABLED:false}
+    vault:
+      enabled: ${VAULT_ENABLED:false}

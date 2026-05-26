@@ -1,0 +1,9 @@
+pay:
+  environment: test
+
+spring:
+  cloud:
+    config:
+      enabled: true
+    vault:
+      enabled: true
