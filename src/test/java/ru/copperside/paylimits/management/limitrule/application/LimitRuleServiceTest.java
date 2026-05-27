@@ -190,6 +190,23 @@ class LimitRuleServiceTest {
     }
 
     @Test
+    void createsNextDraftVersionFromDisabledRule() {
+        OperationType type = repository.addOperationType("SBP_C2B", OperationDirection.IN, true);
+        LimitRule active = service.activateRule(service.createRule(new CreateLimitRuleCommand(
+                "RULE_SBP_C2B_DAY", "SBP C2B daily amount", type.id(), RuleMetric.AMOUNT, RulePeriod.DAY
+        )).id());
+        LimitRule disabled = service.disableRule(active.id());
+
+        LimitRule next = service.createNewVersion(disabled.id());
+
+        assertThat(next.code()).isEqualTo("RULE_SBP_C2B_DAY");
+        assertThat(next.version()).isEqualTo(2);
+        assertThat(next.status()).isEqualTo(RuleStatus.DRAFT);
+        assertThat(next.activatedAt()).isNull();
+        assertThat(next.disabledAt()).isNull();
+    }
+
+    @Test
     void rejectsNewVersionWhenDraftAlreadyExistsForCode() {
         OperationType type = repository.addOperationType("SBP_C2B", OperationDirection.IN, true);
         LimitRule active = repository.addRule(type, "RULE_SBP_C2B_DAY", 1, RuleMetric.AMOUNT, RulePeriod.DAY, RuleStatus.ACTIVE);

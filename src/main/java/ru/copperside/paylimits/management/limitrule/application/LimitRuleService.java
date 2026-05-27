@@ -188,8 +188,8 @@ public class LimitRuleService {
 
     public LimitRule createNewVersion(UUID id) {
         LimitRule existing = getRule(id);
-        if (existing.status() != RuleStatus.ACTIVE) {
-            throw problem("RULE_STATUS_CONFLICT", "Only active rules can be versioned");
+        if (existing.status() == RuleStatus.DRAFT) {
+            throw problem("RULE_STATUS_CONFLICT", "Draft rules cannot be versioned");
         }
         repository.findDraftByCode(existing.code())
                 .ifPresent(rule -> {
