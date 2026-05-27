@@ -1,0 +1,248 @@
+package ru.copperside.paylimits.management.limitrule.adapter.out.postgres;
+
+import org.springframework.boot.autoconfigure.condition.ConditionalOnExpression;
+import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.stereotype.Repository;
+import ru.copperside.paylimits.management.limitrule.application.port.out.LimitRuleRepository;
+import ru.copperside.paylimits.management.limitrule.domain.LimitRule;
+import ru.copperside.paylimits.management.limitrule.domain.LimitRuleProblemException;
+import ru.copperside.paylimits.management.limitrule.domain.OperationDirection;
+import ru.copperside.paylimits.management.limitrule.domain.OperationType;
+import ru.copperside.paylimits.management.limitrule.domain.RuleMetric;
+import ru.copperside.paylimits.management.limitrule.domain.RulePeriod;
+import ru.copperside.paylimits.management.limitrule.domain.RuleStatus;
+
+import java.sql.ResultSet;
+import java.sql.SQLException;
+import java.sql.Timestamp;
+import java.util.List;
+import java.util.Optional;
+import java.util.UUID;
+
+@Repository
+@ConditionalOnExpression("!'${spring.autoconfigure.exclude:}'.contains('DataSourceAutoConfiguration')")
+public class PostgresLimitRuleRepository implements LimitRuleRepository {
+
+    private final JdbcTemplate jdbcTemplate;
+
+    public PostgresLimitRuleRepository(JdbcTemplate jdbcTemplate) {
+        this.jdbcTemplate = jdbcTemplate;
+    }
+
+    @Override
+    public List<OperationType> listOperationTypes() {
+        return jdbcTemplate.query("""
+                select id, code, name, family_code, direction, enabled, created_at, updated_at
+                from limit_management.operation_types
+                order by code asc
+                """, (rs, rowNum) -> mapOperationType(rs));
+    }
+
+    @Override
+    public Optional<OperationType> findOperationType(UUID id) {
+        return jdbcTemplate.query("""
+                select id, code, name, family_code, direction, enabled, created_at, updated_at
+                from limit_management.operation_types
+                where id = ?
+                """, (rs, rowNum) -> mapOperationType(rs), id).stream().findFirst();
+    }
+
+    @Override
+    public OperationType saveOperationType(OperationType type) {
+        try {
+            jdbcTemplate.update("""
+                    insert into limit_management.operation_types
+                        (id, code, name, family_code, direction, enabled, created_at, updated_at)
+                    values (?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    type.id(), type.code(), type.name(), type.familyCode(), type.direction().name(), type.enabled(),
+                    Timestamp.from(type.createdAt()), Timestamp.from(type.updatedAt()));
+            return type;
+        } catch (DataIntegrityViolationException ex) {
+            throw mapIntegrityViolation(ex);
+        }
+    }
+
+    @Override
+    public OperationType updateOperationType(OperationType type) {
+        try {
+            jdbcTemplate.update("""
+                    update limit_management.operation_types
+                    set name = ?, family_code = ?, direction = ?, enabled = ?, updated_at = ?
+                    where id = ?
+                    """,
+                    type.name(), type.familyCode(), type.direction().name(), type.enabled(),
+                    Timestamp.from(type.updatedAt()), type.id());
+            return type;
+        } catch (DataIntegrityViolationException ex) {
+            throw mapIntegrityViolation(ex);
+        }
+    }
+
+    @Override
+    public boolean hasActiveRulesForOperationType(UUID operationTypeId) {
+        Boolean exists = jdbcTemplate.queryForObject("""
+                select exists (
+                    select 1
+                    from limit_management.limit_rules
+                    where operation_type_id = ?
+                      and status = 'ACTIVE'
+                )
+                """, Boolean.class, operationTypeId);
+        return Boolean.TRUE.equals(exists);
+    }
+
+    @Override
+    public List<LimitRule> listRules() {
+        return jdbcTemplate.query(ruleSelect() + " order by r.code asc, r.version asc", (rs, rowNum) -> mapRule(rs));
+    }
+
+    @Override
+    public Optional<LimitRule> findRule(UUID id) {
+        return jdbcTemplate.query(ruleSelect() + " where r.id = ?", (rs, rowNum) -> mapRule(rs), id)
+                .stream()
+                .findFirst();
+    }
+
+    @Override
+    public Optional<LimitRule> findDraftByCode(String code) {
+        return jdbcTemplate.query(ruleSelect() + " where r.code = ? and r.status = 'DRAFT'", (rs, rowNum) -> mapRule(rs), code)
+                .stream()
+                .findFirst();
+    }
+
+    @Override
+    public Optional<LimitRule> findActiveByCode(String code) {
+        return jdbcTemplate.query(ruleSelect() + " where r.code = ? and r.status = 'ACTIVE'", (rs, rowNum) -> mapRule(rs), code)
+                .stream()
+                .findFirst();
+    }
+
+    @Override
+    public int nextVersion(String code) {
+        Integer maxVersion = jdbcTemplate.queryForObject("""
+                select coalesce(max(version), 0)
+                from limit_management.limit_rules
+                where code = ?
+                """, Integer.class, code);
+        return (maxVersion == null ? 0 : maxVersion) + 1;
+    }
+
+    @Override
+    public LimitRule saveRule(LimitRule rule) {
+        try {
+            jdbcTemplate.update("""
+                    insert into limit_management.limit_rules
+                        (id, code, version, name, operation_type_id, target_type, metric, period, currency,
+                         status, created_at, updated_at, activated_at, disabled_at)
+                    values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    rule.id(), rule.code(), rule.version(), rule.name(), rule.operationTypeId(),
+                    rule.targetType(), rule.metric().name(), rule.period().name(), rule.currency(),
+                    rule.status().name(), Timestamp.from(rule.createdAt()), Timestamp.from(rule.updatedAt()),
+                    toTimestamp(rule.activatedAt()), toTimestamp(rule.disabledAt()));
+            return rule;
+        } catch (DataIntegrityViolationException ex) {
+            throw mapIntegrityViolation(ex);
+        }
+    }
+
+    @Override
+    public LimitRule updateRule(LimitRule rule) {
+        try {
+            jdbcTemplate.update("""
+                    update limit_management.limit_rules
+                    set name = ?, operation_type_id = ?, target_type = ?, metric = ?, period = ?, currency = ?,
+                        status = ?, updated_at = ?, activated_at = ?, disabled_at = ?
+                    where id = ?
+                    """,
+                    rule.name(), rule.operationTypeId(), rule.targetType(), rule.metric().name(), rule.period().name(),
+                    rule.currency(), rule.status().name(), Timestamp.from(rule.updatedAt()),
+                    toTimestamp(rule.activatedAt()), toTimestamp(rule.disabledAt()), rule.id());
+            return findRule(rule.id())
+                    .orElseThrow(() -> new LimitRuleProblemException("RULE_NOT_FOUND", "Rule not found"));
+        } catch (DataIntegrityViolationException ex) {
+            throw mapIntegrityViolation(ex);
+        }
+    }
+
+    private String ruleSelect() {
+        return """
+                select r.id, r.code, r.version, r.name, r.operation_type_id,
+                       o.code as operation_type_code, o.direction,
+                       r.target_type, r.metric, r.period, r.currency, r.status,
+                       r.created_at, r.updated_at, r.activated_at, r.disabled_at
+                from limit_management.limit_rules r
+                join limit_management.operation_types o on o.id = r.operation_type_id
+                """;
+    }
+
+    private OperationType mapOperationType(ResultSet rs) throws SQLException {
+        return new OperationType(
+                rs.getObject("id", UUID.class),
+                rs.getString("code"),
+                rs.getString("name"),
+                rs.getString("family_code"),
+                OperationDirection.valueOf(rs.getString("direction")),
+                rs.getBoolean("enabled"),
+                rs.getTimestamp("created_at").toInstant(),
+                rs.getTimestamp("updated_at").toInstant()
+        );
+    }
+
+    private LimitRule mapRule(ResultSet rs) throws SQLException {
+        Timestamp activatedAt = rs.getTimestamp("activated_at");
+        Timestamp disabledAt = rs.getTimestamp("disabled_at");
+        return new LimitRule(
+                rs.getObject("id", UUID.class),
+                rs.getString("code"),
+                rs.getInt("version"),
+                rs.getString("name"),
+                rs.getObject("operation_type_id", UUID.class),
+                rs.getString("operation_type_code"),
+                OperationDirection.valueOf(rs.getString("direction")),
+                rs.getString("target_type"),
+                RuleMetric.valueOf(rs.getString("metric")),
+                RulePeriod.valueOf(rs.getString("period")),
+                rs.getString("currency"),
+                RuleStatus.valueOf(rs.getString("status")),
+                rs.getTimestamp("created_at").toInstant(),
+                rs.getTimestamp("updated_at").toInstant(),
+                activatedAt == null ? null : activatedAt.toInstant(),
+                disabledAt == null ? null : disabledAt.toInstant()
+        );
+    }
+
+    private Timestamp toTimestamp(java.time.Instant instant) {
+        return instant == null ? null : Timestamp.from(instant);
+    }
+
+    private LimitRuleProblemException mapIntegrityViolation(DataIntegrityViolationException ex) {
+        String message = rootMessage(ex);
+        if (message.contains("operation_types_code_uk")) {
+            return new LimitRuleProblemException("OPERATION_TYPE_CODE_CONFLICT", "Operation type code already exists");
+        }
+        if (message.contains("limit_rules_code_version_uk")) {
+            return new LimitRuleProblemException("RULE_CODE_CONFLICT", "Rule code and version already exist");
+        }
+        if (message.contains("limit_rules_one_draft_per_code_uk")) {
+            return new LimitRuleProblemException("RULE_DRAFT_EXISTS", "Draft rule already exists");
+        }
+        if (message.contains("limit_rules_one_active_per_code_uk")) {
+            return new LimitRuleProblemException("RULE_STATUS_CONFLICT", "Another active rule already exists");
+        }
+        if (message.contains("limit_rules_")) {
+            return new LimitRuleProblemException("INVALID_RULE_DEFINITION", "Rule definition is invalid");
+        }
+        return new LimitRuleProblemException("INVALID_RULE_DEFINITION", "Limit rule data violates repository constraints");
+    }
+
+    private String rootMessage(Throwable throwable) {
+        Throwable current = throwable;
+        while (current.getCause() != null) {
+            current = current.getCause();
+        }
+        return current.getMessage() == null ? throwable.getMessage() : current.getMessage();
+    }
+}
