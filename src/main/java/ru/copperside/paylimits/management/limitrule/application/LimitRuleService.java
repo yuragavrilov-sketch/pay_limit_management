@@ -197,7 +197,7 @@ public class LimitRuleService {
             throw problem("RULE_STATUS_CONFLICT", "Draft rules cannot be versioned");
         }
         rejectExistingDraft(existing.code());
-        OperationType type = requireEnabledOperationType(existing.operationTypeId());
+        OperationType type = requireOperationType(existing.operationTypeId());
         Instant now = Instant.now(clock);
         return repository.saveRule(new LimitRule(
                 UUID.randomUUID(),
@@ -237,12 +237,16 @@ public class LimitRuleService {
     }
 
     private OperationType requireEnabledOperationType(UUID operationTypeId) {
-        OperationType type = repository.findOperationType(requireUuid(operationTypeId, "operationTypeId"))
-                .orElseThrow(() -> problem("OPERATION_TYPE_NOT_FOUND", "Operation type not found"));
+        OperationType type = requireOperationType(operationTypeId);
         if (!type.enabled()) {
             throw problem("OPERATION_TYPE_DISABLED", "Operation type is disabled");
         }
         return type;
+    }
+
+    private OperationType requireOperationType(UUID operationTypeId) {
+        return repository.findOperationType(requireUuid(operationTypeId, "operationTypeId"))
+                .orElseThrow(() -> problem("OPERATION_TYPE_NOT_FOUND", "Operation type not found"));
     }
 
     private void requireCommand(Object command) {
