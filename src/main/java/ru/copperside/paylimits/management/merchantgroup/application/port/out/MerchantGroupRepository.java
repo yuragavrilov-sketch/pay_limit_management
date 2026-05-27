@@ -22,4 +22,12 @@ public interface MerchantGroupRepository {
     void closeMembership(UUID membershipId, Instant validTo, Instant closedAt, String closedBy);
 
     MerchantGroupMembership saveMembership(MerchantGroupMembership membership);
+
+    MerchantGroupMembership replaceMembership(
+            UUID membershipId,
+            Instant validTo,
+            Instant closedAt,
+            String closedBy,
+            MerchantGroupMembership membership
+    );
 }

@@ -101,6 +101,72 @@ class MerchantGroupServiceTest {
         assertThat(next.groupId()).isEqualTo(high.id());
         assertThat(repository.closedMembershipId).isEqualTo(previous.id());
         assertThat(repository.closedValidTo).isEqualTo(Instant.parse("2026-05-27T10:00:00Z"));
+        assertThat(repository.replacedMembershipId).isEqualTo(previous.id());
+    }
+
+    @Test
+    void assigningMerchantToSameActiveGroupReturnsExistingMembership() {
+        MerchantGroupType type = repository.addType("risk-tier", true);
+        MerchantGroup group = repository.addGroup(type.id(), "risk-high", true);
+        MerchantGroupMembership previous = repository.addMembership(
+                "502118",
+                group.id(),
+                type.id(),
+                Instant.parse("2026-05-26T09:00:00Z"),
+                null
+        );
+
+        MerchantGroupMembership next = service.assignMembership(new AssignMembershipCommand(
+                "502118",
+                group.id(),
+                Instant.parse("2026-05-27T10:00:00Z"),
+                "alice"
+        ));
+
+        assertThat(next).isEqualTo(previous);
+        assertThat(repository.memberships).containsExactly(previous);
+        assertThat(repository.closedMembershipId).isNull();
+    }
+
+    @Test
+    void rejectsAssignmentWithoutValidFrom() {
+        MerchantGroupType type = repository.addType("risk-tier", true);
+        MerchantGroup group = repository.addGroup(type.id(), "risk-high", true);
+
+        assertThatThrownBy(() -> service.assignMembership(new AssignMembershipCommand(
+                "502118",
+                group.id(),
+                null,
+                "alice"
+        )))
+                .isInstanceOf(MerchantGroupProblemException.class)
+                .hasMessageContaining("VALIDATION_ERROR");
+    }
+
+    @Test
+    void rejectsSameInstantReplacementThatWouldCreateZeroLengthHistory() {
+        MerchantGroupType type = repository.addType("risk-tier", true);
+        MerchantGroup low = repository.addGroup(type.id(), "risk-low", true);
+        MerchantGroup high = repository.addGroup(type.id(), "risk-high", true);
+        MerchantGroupMembership previous = repository.addMembership(
+                "502118",
+                low.id(),
+                type.id(),
+                Instant.parse("2026-05-27T10:00:00Z"),
+                null
+        );
+
+        assertThatThrownBy(() -> service.assignMembership(new AssignMembershipCommand(
+                "502118",
+                high.id(),
+                Instant.parse("2026-05-27T10:00:00Z"),
+                "alice"
+        )))
+                .isInstanceOf(MerchantGroupProblemException.class)
+                .hasMessageContaining("INVALID_MEMBERSHIP_PERIOD");
+
+        assertThat(repository.memberships).containsExactly(previous);
+        assertThat(repository.closedMembershipId).isNull();
     }
 
     @Test
@@ -131,12 +197,28 @@ class MerchantGroupServiceTest {
                 .hasMessageContaining("GROUP_DISABLED");
     }
 
+    @Test
+    void rejectsAssignmentToDisabledType() {
+        MerchantGroupType type = repository.addType("risk-tier", false);
+        MerchantGroup group = repository.addGroup(type.id(), "risk-high", true);
+
+        assertThatThrownBy(() -> service.assignMembership(new AssignMembershipCommand(
+                "502118",
+                group.id(),
+                Instant.parse("2026-05-27T10:00:00Z"),
+                "alice"
+        )))
+                .isInstanceOf(MerchantGroupProblemException.class)
+                .hasMessageContaining("GROUP_TYPE_DISABLED");
+    }
+
     static class FakeRepository implements MerchantGroupRepository {
         final List<MerchantGroupType> types = new ArrayList<>();
         final List<MerchantGroup> groups = new ArrayList<>();
         final List<MerchantGroupMembership> memberships = new ArrayList<>();
         UUID closedMembershipId;
         Instant closedValidTo;
+        UUID replacedMembershipId;
 
         MerchantGroupType addType(String code, boolean enabled) {
             MerchantGroupType type = new MerchantGroupType(UUID.randomUUID(), code, code, null, enabled, 0, Instant.EPOCH, Instant.EPOCH);
@@ -202,6 +284,19 @@ class MerchantGroupServiceTest {
         public MerchantGroupMembership saveMembership(MerchantGroupMembership membership) {
             memberships.add(membership);
             return membership;
+        }
+
+        @Override
+        public MerchantGroupMembership replaceMembership(
+                UUID membershipId,
+                Instant validTo,
+                Instant closedAt,
+                String closedBy,
+                MerchantGroupMembership membership
+        ) {
+            replacedMembershipId = membershipId;
+            closeMembership(membershipId, validTo, closedAt, closedBy);
+            return saveMembership(membership);
         }
     }
 }

@@ -1,5 +1,6 @@
 package ru.copperside.paylimits.management.merchantgroup.config;
 
+import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import ru.copperside.paylimits.management.merchantgroup.application.MerchantGroupService;
@@ -11,6 +12,7 @@ import java.time.Clock;
 public class MerchantGroupUseCaseConfig {
 
     @Bean
+    @ConditionalOnBean(MerchantGroupRepository.class)
     MerchantGroupService merchantGroupService(MerchantGroupRepository repository, Clock clock) {
         return new MerchantGroupService(repository, clock);
     }
