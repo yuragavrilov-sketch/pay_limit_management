@@ -13,6 +13,7 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 
 import java.sql.Timestamp;
 import java.time.Instant;
+import java.util.List;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -52,6 +53,26 @@ class MerchantGroupSchemaIntegrationTest {
                 """, Integer.class);
 
         assertThat(tableCount).isEqualTo(3);
+    }
+
+    @Test
+    void flywayCreatesOperationTypesAndLimitRulesWithSbpSeed() {
+        Integer tableCount = jdbcTemplate.queryForObject("""
+                select count(*)
+                from information_schema.tables
+                where table_schema = 'limit_management'
+                  and table_name in ('operation_types', 'limit_rules')
+                """, Integer.class);
+
+        assertThat(tableCount).isEqualTo(2);
+
+        List<String> operationCodes = jdbcTemplate.queryForList("""
+                select code
+                from limit_management.operation_types
+                order by code asc
+                """, String.class);
+
+        assertThat(operationCodes).contains("SBP_B2C", "SBP_C2B");
     }
 
     @Test
