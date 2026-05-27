@@ -7,6 +7,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import ru.copperside.paylimits.management.limitrule.domain.LimitRuleProblemException;
 import ru.copperside.paylimits.management.merchantgroup.domain.MerchantGroupProblemException;
 
 import java.time.Clock;
@@ -41,6 +42,16 @@ public class GlobalExceptionHandler {
             default -> HttpStatus.CONFLICT;
         };
         return problem(status, ex.code(), "Merchant group problem", ex.getMessage());
+    }
+
+    @ExceptionHandler(LimitRuleProblemException.class)
+    ResponseEntity<ProblemEnvelope> handleLimitRuleProblem(LimitRuleProblemException ex) {
+        HttpStatus status = switch (ex.code()) {
+            case "OPERATION_TYPE_NOT_FOUND", "RULE_NOT_FOUND" -> HttpStatus.NOT_FOUND;
+            case "INVALID_RULE_DEFINITION", "VALIDATION_ERROR" -> HttpStatus.BAD_REQUEST;
+            default -> HttpStatus.CONFLICT;
+        };
+        return problem(status, ex.code(), "Limit rule problem", ex.getMessage());
     }
 
     private ResponseEntity<ProblemEnvelope> problem(HttpStatus status, String code, String title, String message) {
