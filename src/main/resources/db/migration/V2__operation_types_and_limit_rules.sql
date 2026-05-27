@@ -52,6 +52,10 @@ create unique index limit_rules_one_draft_per_code_uk
     on limit_management.limit_rules (code)
     where status = 'DRAFT';
 
+create unique index limit_rules_one_active_per_code_uk
+    on limit_management.limit_rules (code)
+    where status = 'ACTIVE';
+
 create index limit_rules_operation_type_idx
     on limit_management.limit_rules (operation_type_id, status, code);
 

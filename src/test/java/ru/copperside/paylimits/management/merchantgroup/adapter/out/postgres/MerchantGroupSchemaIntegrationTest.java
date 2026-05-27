@@ -76,6 +76,29 @@ class MerchantGroupSchemaIntegrationTest {
     }
 
     @Test
+    void databaseRejectsTwoActiveLimitRuleVersionsForSameCode() {
+        UUID operationTypeId = UUID.fromString("11111111-1111-1111-1111-111111111111");
+
+        jdbcTemplate.update("""
+                insert into limit_management.limit_rules
+                    (id, code, version, name, operation_type_id, target_type, metric, period, currency,
+                     status, created_at, updated_at, activated_at, disabled_at)
+                values (?, 'RULE_SBP_C2B_DAY', 1, 'SBP C2B daily amount', ?, 'PHONE', 'AMOUNT', 'DAY', 'RUB',
+                        'ACTIVE', now(), now(), now(), null)
+                """, UUID.randomUUID(), operationTypeId);
+
+        assertThatThrownBy(() -> jdbcTemplate.update("""
+                insert into limit_management.limit_rules
+                    (id, code, version, name, operation_type_id, target_type, metric, period, currency,
+                     status, created_at, updated_at, activated_at, disabled_at)
+                values (?, 'RULE_SBP_C2B_DAY', 2, 'SBP C2B daily amount v2', ?, 'PHONE', 'AMOUNT', 'DAY', 'RUB',
+                        'ACTIVE', now(), now(), now(), null)
+                """, UUID.randomUUID(), operationTypeId))
+                .isInstanceOf(DataIntegrityViolationException.class)
+                .hasMessageContaining("limit_rules_one_active_per_code_uk");
+    }
+
+    @Test
     void databaseRejectsOverlappingMembershipForSameMerchantAndType() {
         UUID typeId = UUID.randomUUID();
         UUID groupId = UUID.randomUUID();
