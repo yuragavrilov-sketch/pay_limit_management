@@ -8,6 +8,7 @@ import ru.copperside.paylimits.management.merchantgroup.domain.MerchantGroupType
 
 import java.time.Clock;
 import java.time.Instant;
+import java.util.List;
 import java.util.UUID;
 
 public class MerchantGroupService {
@@ -35,6 +36,27 @@ public class MerchantGroupService {
         ));
     }
 
+    public List<MerchantGroupType> listTypes() {
+        return repository.listTypes();
+    }
+
+    public MerchantGroupType updateType(UUID id, PatchGroupTypeCommand command) {
+        requireCommand(command);
+        MerchantGroupType existing = repository.findType(requireUuid(id, "typeId"))
+                .orElseThrow(() -> problem("GROUP_TYPE_NOT_FOUND", "Group type not found"));
+        MerchantGroupType updated = new MerchantGroupType(
+                existing.id(),
+                existing.code(),
+                command.name() == null ? existing.name() : requireText(command.name(), "name"),
+                command.description() == null ? existing.description() : blankToNull(command.description()),
+                command.enabled() == null ? existing.enabled() : command.enabled(),
+                command.sortOrder() == null ? existing.sortOrder() : command.sortOrder(),
+                existing.createdAt(),
+                Instant.now(clock)
+        );
+        return repository.updateType(updated);
+    }
+
     public MerchantGroup createGroup(CreateGroupCommand command) {
         requireCommand(command);
         MerchantGroupType type = repository.findType(requireUuid(command.typeId(), "typeId"))
@@ -53,6 +75,27 @@ public class MerchantGroupService {
                 now,
                 now
         ));
+    }
+
+    public List<MerchantGroup> listGroups(UUID typeId) {
+        return repository.listGroups(typeId);
+    }
+
+    public MerchantGroup updateGroup(UUID id, PatchGroupCommand command) {
+        requireCommand(command);
+        MerchantGroup existing = repository.findGroup(requireUuid(id, "groupId"))
+                .orElseThrow(() -> problem("GROUP_NOT_FOUND", "Group not found"));
+        MerchantGroup updated = new MerchantGroup(
+                existing.id(),
+                existing.typeId(),
+                existing.code(),
+                command.name() == null ? existing.name() : requireText(command.name(), "name"),
+                command.description() == null ? existing.description() : blankToNull(command.description()),
+                command.enabled() == null ? existing.enabled() : command.enabled(),
+                existing.createdAt(),
+                Instant.now(clock)
+        );
+        return repository.updateGroup(updated);
     }
 
     public MerchantGroupMembership assignMembership(AssignMembershipCommand command) {
@@ -88,6 +131,34 @@ public class MerchantGroupService {
         return repository.findOverlappingMembership(merchantId, type.id(), validFrom)
                 .map(existing -> replaceExistingMembership(existing, validFrom, now, actor, membership))
                 .orElseGet(() -> repository.saveMembership(membership));
+    }
+
+    public List<MerchantGroupMembership> listMemberships(MembershipQuery query) {
+        requireCommand(query);
+        String state = query.state() == null || query.state().isBlank() ? "current" : query.state();
+        if (!state.equals("current") && !state.equals("history") && !state.equals("all")) {
+            throw problem("VALIDATION_ERROR", "state must be current, history, or all");
+        }
+        return repository.listMemberships(
+                blankToNull(query.merchantId()),
+                query.typeId(),
+                query.groupId(),
+                state,
+                Instant.now(clock)
+        );
+    }
+
+    public MerchantGroupMembership closeMembership(CloseMembershipCommand command) {
+        requireCommand(command);
+        UUID membershipId = requireUuid(command.membershipId(), "membershipId");
+        Instant validTo = requireInstant(command.validTo(), "validTo");
+        String actor = requireText(command.actor(), "actor");
+        MerchantGroupMembership membership = repository.findMembership(membershipId)
+                .orElseThrow(() -> problem("MEMBERSHIP_NOT_FOUND", "Membership not found"));
+        if (!validTo.isAfter(membership.validFrom())) {
+            throw problem("INVALID_MEMBERSHIP_PERIOD", "validTo must be after validFrom");
+        }
+        return repository.closeMembership(membershipId, validTo, Instant.now(clock), actor);
     }
 
     private MerchantGroupMembership replaceExistingMembership(

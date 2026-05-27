@@ -15,6 +15,8 @@ import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Timestamp;
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -26,6 +28,15 @@ public class PostgresMerchantGroupRepository implements MerchantGroupRepository 
 
     public PostgresMerchantGroupRepository(JdbcTemplate jdbcTemplate) {
         this.jdbcTemplate = jdbcTemplate;
+    }
+
+    @Override
+    public List<MerchantGroupType> listTypes() {
+        return jdbcTemplate.query("""
+                select id, code, name, description, enabled, sort_order, created_at, updated_at
+                from limit_management.merchant_group_types
+                order by sort_order asc, code asc
+                """, (rs, rowNum) -> mapType(rs));
     }
 
     @Override
@@ -45,12 +56,40 @@ public class PostgresMerchantGroupRepository implements MerchantGroupRepository 
     }
 
     @Override
+    public MerchantGroupType updateType(MerchantGroupType type) {
+        jdbcTemplate.update("""
+                update limit_management.merchant_group_types
+                set name = ?, description = ?, enabled = ?, sort_order = ?, updated_at = ?
+                where id = ?
+                """,
+                type.name(), type.description(), type.enabled(), type.sortOrder(), Timestamp.from(type.updatedAt()), type.id());
+        return type;
+    }
+
+    @Override
     public Optional<MerchantGroupType> findType(UUID typeId) {
         return jdbcTemplate.query("""
                 select id, code, name, description, enabled, sort_order, created_at, updated_at
                 from limit_management.merchant_group_types
                 where id = ?
                 """, (rs, rowNum) -> mapType(rs), typeId).stream().findFirst();
+    }
+
+    @Override
+    public List<MerchantGroup> listGroups(UUID typeId) {
+        if (typeId == null) {
+            return jdbcTemplate.query("""
+                    select id, type_id, code, name, description, enabled, created_at, updated_at
+                    from limit_management.merchant_groups
+                    order by code asc
+                    """, (rs, rowNum) -> mapGroup(rs));
+        }
+        return jdbcTemplate.query("""
+                select id, type_id, code, name, description, enabled, created_at, updated_at
+                from limit_management.merchant_groups
+                where type_id = ?
+                order by code asc
+                """, (rs, rowNum) -> mapGroup(rs), typeId);
     }
 
     @Override
@@ -70,12 +109,63 @@ public class PostgresMerchantGroupRepository implements MerchantGroupRepository 
     }
 
     @Override
+    public MerchantGroup updateGroup(MerchantGroup group) {
+        jdbcTemplate.update("""
+                update limit_management.merchant_groups
+                set name = ?, description = ?, enabled = ?, updated_at = ?
+                where id = ?
+                """,
+                group.name(), group.description(), group.enabled(), Timestamp.from(group.updatedAt()), group.id());
+        return group;
+    }
+
+    @Override
     public Optional<MerchantGroup> findGroup(UUID groupId) {
         return jdbcTemplate.query("""
                 select id, type_id, code, name, description, enabled, created_at, updated_at
                 from limit_management.merchant_groups
                 where id = ?
                 """, (rs, rowNum) -> mapGroup(rs), groupId).stream().findFirst();
+    }
+
+    @Override
+    public List<MerchantGroupMembership> listMemberships(String merchantId, UUID typeId, UUID groupId, String state, Instant at) {
+        StringBuilder sql = new StringBuilder("""
+                select id, merchant_id, group_id, group_type_id, valid_from, valid_to, created_at, created_by, closed_at, closed_by
+                from limit_management.merchant_group_memberships
+                where 1 = 1
+                """);
+        List<Object> args = new ArrayList<>();
+        if (merchantId != null) {
+            sql.append(" and merchant_id = ?");
+            args.add(merchantId);
+        }
+        if (typeId != null) {
+            sql.append(" and group_type_id = ?");
+            args.add(typeId);
+        }
+        if (groupId != null) {
+            sql.append(" and group_id = ?");
+            args.add(groupId);
+        }
+        if ("current".equals(state)) {
+            sql.append(" and valid_from <= ? and (valid_to is null or valid_to > ?)");
+            args.add(Timestamp.from(at));
+            args.add(Timestamp.from(at));
+        } else if ("history".equals(state)) {
+            sql.append(" and valid_to is not null");
+        }
+        sql.append(" order by valid_from desc");
+        return jdbcTemplate.query(sql.toString(), (rs, rowNum) -> mapMembership(rs), args.toArray());
+    }
+
+    @Override
+    public Optional<MerchantGroupMembership> findMembership(UUID membershipId) {
+        return jdbcTemplate.query("""
+                select id, merchant_id, group_id, group_type_id, valid_from, valid_to, created_at, created_by, closed_at, closed_by
+                from limit_management.merchant_group_memberships
+                where id = ?
+                """, (rs, rowNum) -> mapMembership(rs), membershipId).stream().findFirst();
     }
 
     @Override
@@ -110,8 +200,10 @@ public class PostgresMerchantGroupRepository implements MerchantGroupRepository 
     }
 
     @Override
-    public void closeMembership(UUID membershipId, Instant validTo, Instant closedAt, String closedBy) {
+    public MerchantGroupMembership closeMembership(UUID membershipId, Instant validTo, Instant closedAt, String closedBy) {
         closeMembershipRow(membershipId, validTo, closedAt, closedBy);
+        return findMembership(membershipId)
+                .orElseThrow(() -> new MerchantGroupProblemException("MEMBERSHIP_NOT_FOUND", "Membership not found"));
     }
 
     @Override

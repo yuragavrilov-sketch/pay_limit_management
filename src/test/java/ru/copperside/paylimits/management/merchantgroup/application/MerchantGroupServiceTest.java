@@ -317,8 +317,19 @@ class MerchantGroupServiceTest {
         }
 
         @Override
+        public List<MerchantGroupType> listTypes() {
+            return List.copyOf(types);
+        }
+
+        @Override
         public MerchantGroupType saveType(MerchantGroupType type) {
             types.add(type);
+            return type;
+        }
+
+        @Override
+        public MerchantGroupType updateType(MerchantGroupType type) {
+            types.replaceAll(existing -> existing.id().equals(type.id()) ? type : existing);
             return type;
         }
 
@@ -328,14 +339,41 @@ class MerchantGroupServiceTest {
         }
 
         @Override
+        public List<MerchantGroup> listGroups(UUID typeId) {
+            return groups.stream()
+                    .filter(group -> typeId == null || group.typeId().equals(typeId))
+                    .toList();
+        }
+
+        @Override
         public MerchantGroup saveGroup(MerchantGroup group) {
             groups.add(group);
             return group;
         }
 
         @Override
+        public MerchantGroup updateGroup(MerchantGroup group) {
+            groups.replaceAll(existing -> existing.id().equals(group.id()) ? group : existing);
+            return group;
+        }
+
+        @Override
         public Optional<MerchantGroup> findGroup(UUID groupId) {
             return groups.stream().filter(group -> group.id().equals(groupId)).findFirst();
+        }
+
+        @Override
+        public List<MerchantGroupMembership> listMemberships(String merchantId, UUID typeId, UUID groupId, String state, Instant at) {
+            return memberships.stream()
+                    .filter(membership -> merchantId == null || membership.merchantId().equals(merchantId))
+                    .filter(membership -> typeId == null || membership.groupTypeId().equals(typeId))
+                    .filter(membership -> groupId == null || membership.groupId().equals(groupId))
+                    .toList();
+        }
+
+        @Override
+        public Optional<MerchantGroupMembership> findMembership(UUID membershipId) {
+            return memberships.stream().filter(membership -> membership.id().equals(membershipId)).findFirst();
         }
 
         @Override
@@ -359,12 +397,14 @@ class MerchantGroupServiceTest {
         }
 
         @Override
-        public void closeMembership(UUID membershipId, Instant validTo, Instant closedAt, String closedBy) {
+        public MerchantGroupMembership closeMembership(UUID membershipId, Instant validTo, Instant closedAt, String closedBy) {
             closedMembershipId = membershipId;
             closedValidTo = validTo;
+            final MerchantGroupMembership[] closed = new MerchantGroupMembership[1];
             memberships.replaceAll(membership -> membership.id().equals(membershipId)
-                    ? membership.close(validTo, closedAt, closedBy)
+                    ? (closed[0] = membership.close(validTo, closedAt, closedBy))
                     : membership);
+            return closed[0];
         }
 
         @Override

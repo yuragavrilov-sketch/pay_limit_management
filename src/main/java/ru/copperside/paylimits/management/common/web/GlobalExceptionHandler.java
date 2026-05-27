@@ -1,0 +1,60 @@
+package ru.copperside.paylimits.management.common.web;
+
+import jakarta.validation.ConstraintViolationException;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.MethodArgumentNotValidException;
+import org.springframework.web.bind.annotation.ExceptionHandler;
+import org.springframework.web.bind.annotation.RestControllerAdvice;
+import ru.copperside.paylimits.management.merchantgroup.domain.MerchantGroupProblemException;
+
+import java.time.Clock;
+import java.util.UUID;
+
+@RestControllerAdvice
+public class GlobalExceptionHandler {
+
+    private static final String TYPE_BASE = "https://contracts.newpay/errors/";
+
+    private final Clock clock;
+
+    public GlobalExceptionHandler(Clock clock) {
+        this.clock = clock;
+    }
+
+    @ExceptionHandler(MethodArgumentNotValidException.class)
+    ResponseEntity<ProblemEnvelope> handleBodyValidation(MethodArgumentNotValidException ex) {
+        return problem(HttpStatus.BAD_REQUEST, "VALIDATION_ERROR", "Validation failed", ex.getMessage());
+    }
+
+    @ExceptionHandler(ConstraintViolationException.class)
+    ResponseEntity<ProblemEnvelope> handleConstraintValidation(ConstraintViolationException ex) {
+        return problem(HttpStatus.BAD_REQUEST, "VALIDATION_ERROR", "Validation failed", ex.getMessage());
+    }
+
+    @ExceptionHandler(MerchantGroupProblemException.class)
+    ResponseEntity<ProblemEnvelope> handleDomainProblem(MerchantGroupProblemException ex) {
+        HttpStatus status = switch (ex.code()) {
+            case "GROUP_TYPE_NOT_FOUND", "GROUP_NOT_FOUND", "MEMBERSHIP_NOT_FOUND" -> HttpStatus.NOT_FOUND;
+            case "VALIDATION_ERROR", "INVALID_MEMBERSHIP_PERIOD" -> HttpStatus.BAD_REQUEST;
+            default -> HttpStatus.CONFLICT;
+        };
+        return problem(status, ex.code(), "Merchant group problem", ex.getMessage());
+    }
+
+    private ResponseEntity<ProblemEnvelope> problem(HttpStatus status, String code, String title, String message) {
+        ProblemDetail detail = new ProblemDetail(
+                TYPE_BASE + code.toLowerCase().replace('_', '-'),
+                title,
+                status.value(),
+                code,
+                message,
+                null,
+                UUID.randomUUID().toString()
+        );
+        return ResponseEntity.status(status)
+                .contentType(MediaType.APPLICATION_PROBLEM_JSON)
+                .body(ProblemEnvelope.of(detail, clock));
+    }
+}
