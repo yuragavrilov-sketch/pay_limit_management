@@ -82,6 +82,7 @@ public class LimitRuleService {
         OperationType type = requireEnabledOperationType(command.operationTypeId());
         RuleMetric metric = requireEnum(command.metric(), "metric");
         RulePeriod period = requireEnum(command.period(), "period");
+        rejectExistingDraft(code);
         Instant now = Instant.now(clock);
         return repository.saveRule(new LimitRule(
                 UUID.randomUUID(),
@@ -136,7 +137,11 @@ public class LimitRuleService {
     public LimitRule activateRule(UUID id) {
         LimitRule existing = getRule(id);
         requireDraft(existing);
-        requireEnabledOperationType(existing.operationTypeId());
+        OperationType type = requireEnabledOperationType(existing.operationTypeId());
+        repository.findActiveByCode(existing.code())
+                .ifPresent(rule -> {
+                    throw problem("RULE_STATUS_CONFLICT", "Another active rule already exists");
+                });
         Instant now = Instant.now(clock);
         LimitRule updated = new LimitRule(
                 existing.id(),
@@ -144,8 +149,8 @@ public class LimitRuleService {
                 existing.version(),
                 existing.name(),
                 existing.operationTypeId(),
-                existing.operationTypeCode(),
-                existing.direction(),
+                type.code(),
+                type.direction(),
                 existing.targetType(),
                 existing.metric(),
                 existing.period(),
@@ -191,10 +196,7 @@ public class LimitRuleService {
         if (existing.status() == RuleStatus.DRAFT) {
             throw problem("RULE_STATUS_CONFLICT", "Draft rules cannot be versioned");
         }
-        repository.findDraftByCode(existing.code())
-                .ifPresent(rule -> {
-                    throw problem("RULE_DRAFT_EXISTS", "Draft rule already exists");
-                });
+        rejectExistingDraft(existing.code());
         OperationType type = requireEnabledOperationType(existing.operationTypeId());
         Instant now = Instant.now(clock);
         return repository.saveRule(new LimitRule(
@@ -225,6 +227,13 @@ public class LimitRuleService {
         if (rule.status() != RuleStatus.DRAFT) {
             throw problem("RULE_STATUS_CONFLICT", "Only draft rules can be edited");
         }
+    }
+
+    private void rejectExistingDraft(String code) {
+        repository.findDraftByCode(code)
+                .ifPresent(rule -> {
+                    throw problem("RULE_DRAFT_EXISTS", "Draft rule already exists");
+                });
     }
 
     private OperationType requireEnabledOperationType(UUID operationTypeId) {

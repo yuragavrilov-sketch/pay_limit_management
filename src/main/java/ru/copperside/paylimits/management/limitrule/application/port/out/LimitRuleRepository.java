@@ -24,6 +24,8 @@ public interface LimitRuleRepository {
 
     Optional<LimitRule> findDraftByCode(String code);
 
+    Optional<LimitRule> findActiveByCode(String code);
+
     int nextVersion(String code);
 
     LimitRule saveRule(LimitRule rule);

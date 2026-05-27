@@ -132,6 +132,20 @@ class LimitRuleServiceTest {
     }
 
     @Test
+    void createRuleRejectsWhenDraftAlreadyExistsForCode() {
+        OperationType type = repository.addOperationType("SBP_C2B", OperationDirection.IN, true);
+        service.createRule(new CreateLimitRuleCommand(
+                "RULE_SBP_C2B_DAY", "SBP C2B daily amount", type.id(), RuleMetric.AMOUNT, RulePeriod.DAY
+        ));
+
+        assertThatThrownBy(() -> service.createRule(new CreateLimitRuleCommand(
+                "RULE_SBP_C2B_DAY", "SBP C2B daily amount duplicate", type.id(), RuleMetric.AMOUNT, RulePeriod.DAY
+        )))
+                .isInstanceOf(LimitRuleProblemException.class)
+                .hasMessageContaining("RULE_DRAFT_EXISTS");
+    }
+
+    @Test
     void rejectsRuleCreationForDisabledOperationType() {
         OperationType type = repository.addOperationType("SBP_C2B", OperationDirection.IN, false);
 
@@ -140,6 +154,33 @@ class LimitRuleServiceTest {
         )))
                 .isInstanceOf(LimitRuleProblemException.class)
                 .hasMessageContaining("OPERATION_TYPE_DISABLED");
+    }
+
+    @Test
+    void activateRuleRejectsWhenAnotherActiveVersionExistsForCode() {
+        OperationType type = repository.addOperationType("SBP_C2B", OperationDirection.IN, true);
+        LimitRule active = service.activateRule(service.createRule(new CreateLimitRuleCommand(
+                "RULE_SBP_C2B_DAY", "SBP C2B daily amount", type.id(), RuleMetric.AMOUNT, RulePeriod.DAY
+        )).id());
+        LimitRule draft = service.createNewVersion(active.id());
+
+        assertThatThrownBy(() -> service.activateRule(draft.id()))
+                .isInstanceOf(LimitRuleProblemException.class)
+                .hasMessageContaining("RULE_STATUS_CONFLICT");
+    }
+
+    @Test
+    void activateRuleUsesCurrentOperationTypeDirection() {
+        OperationType type = repository.addOperationType("SBP_C2B", OperationDirection.IN, true);
+        LimitRule draft = service.createRule(new CreateLimitRuleCommand(
+                "RULE_SBP_C2B_DAY", "SBP C2B daily amount", type.id(), RuleMetric.AMOUNT, RulePeriod.DAY
+        ));
+        service.patchOperationType(type.id(), new PatchOperationTypeCommand(null, null, OperationDirection.OUT, null));
+
+        LimitRule active = service.activateRule(draft.id());
+
+        assertThat(active.operationTypeCode()).isEqualTo("SBP_C2B");
+        assertThat(active.direction()).isEqualTo(OperationDirection.OUT);
     }
 
     @Test
@@ -324,6 +365,14 @@ class LimitRuleServiceTest {
             return rules.stream()
                     .filter(rule -> rule.code().equals(code))
                     .filter(rule -> rule.status() == RuleStatus.DRAFT)
+                    .findFirst();
+        }
+
+        @Override
+        public Optional<LimitRule> findActiveByCode(String code) {
+            return rules.stream()
+                    .filter(rule -> rule.code().equals(code))
+                    .filter(rule -> rule.status() == RuleStatus.ACTIVE)
                     .findFirst();
         }
 
