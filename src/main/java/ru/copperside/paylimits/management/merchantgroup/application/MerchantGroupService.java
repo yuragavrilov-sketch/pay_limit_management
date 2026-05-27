@@ -97,6 +97,9 @@ public class MerchantGroupService {
             String actor,
             MerchantGroupMembership membership
     ) {
+        if (existing.validTo() != null || existing.closedAt() != null) {
+            throw problem("INVALID_MEMBERSHIP_PERIOD", "Assignment must not rewrite closed membership history");
+        }
         if (existing.groupId().equals(membership.groupId())) {
             return existing;
         }

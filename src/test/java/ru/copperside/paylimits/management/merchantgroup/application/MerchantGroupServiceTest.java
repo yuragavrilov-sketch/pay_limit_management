@@ -129,6 +129,57 @@ class MerchantGroupServiceTest {
     }
 
     @Test
+    void rejectsAssignmentInsideClosedHistoryForSameGroup() {
+        MerchantGroupType type = repository.addType("risk-tier", true);
+        MerchantGroup group = repository.addGroup(type.id(), "risk-high", true);
+        MerchantGroupMembership previous = repository.addMembership(
+                "502118",
+                group.id(),
+                type.id(),
+                Instant.parse("2026-05-26T09:00:00Z"),
+                Instant.parse("2026-05-28T09:00:00Z")
+        );
+
+        assertThatThrownBy(() -> service.assignMembership(new AssignMembershipCommand(
+                "502118",
+                group.id(),
+                Instant.parse("2026-05-27T10:00:00Z"),
+                "alice"
+        )))
+                .isInstanceOf(MerchantGroupProblemException.class)
+                .hasMessageContaining("INVALID_MEMBERSHIP_PERIOD");
+
+        assertThat(repository.memberships).containsExactly(previous);
+        assertThat(repository.closedMembershipId).isNull();
+    }
+
+    @Test
+    void rejectsAssignmentInsideClosedHistoryForDifferentGroup() {
+        MerchantGroupType type = repository.addType("risk-tier", true);
+        MerchantGroup low = repository.addGroup(type.id(), "risk-low", true);
+        MerchantGroup high = repository.addGroup(type.id(), "risk-high", true);
+        MerchantGroupMembership previous = repository.addMembership(
+                "502118",
+                low.id(),
+                type.id(),
+                Instant.parse("2026-05-26T09:00:00Z"),
+                Instant.parse("2026-05-28T09:00:00Z")
+        );
+
+        assertThatThrownBy(() -> service.assignMembership(new AssignMembershipCommand(
+                "502118",
+                high.id(),
+                Instant.parse("2026-05-27T10:00:00Z"),
+                "alice"
+        )))
+                .isInstanceOf(MerchantGroupProblemException.class)
+                .hasMessageContaining("INVALID_MEMBERSHIP_PERIOD");
+
+        assertThat(repository.memberships).containsExactly(previous);
+        assertThat(repository.closedMembershipId).isNull();
+    }
+
+    @Test
     void rejectsAssignmentWithoutValidFrom() {
         MerchantGroupType type = repository.addType("risk-tier", true);
         MerchantGroup group = repository.addGroup(type.id(), "risk-high", true);
