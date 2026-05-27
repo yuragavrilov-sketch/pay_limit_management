@@ -13,6 +13,14 @@ spring:
     import:
       - optional:configserver:${CONFIG_SERVER_URL:http://pay-config:8080}
       - optional:vault://
+  datasource:
+    url: ${PAY_LIMIT_MANAGEMENT_DB_URL:jdbc:postgresql://localhost:5432/pay_admin?currentSchema=limit_management}
+    username: ${PAY_LIMIT_MANAGEMENT_DB_USERNAME:pay_admin}
+    password: ${PAY_LIMIT_MANAGEMENT_DB_PASSWORD:pay_admin}
+  flyway:
+    enabled: ${PAY_LIMIT_MANAGEMENT_FLYWAY_ENABLED:true}
+    schemas: limit_management
+    default-schema: limit_management
   cloud:
     config:
       enabled: ${CONFIG_SERVER_ENABLED:false}
