@@ -19,6 +19,8 @@ public interface MerchantGroupRepository {
 
     Optional<MerchantGroupMembership> findActiveMembership(String merchantId, UUID groupTypeId, Instant at);
 
+    Optional<MerchantGroupMembership> findOverlappingMembership(String merchantId, UUID groupTypeId, Instant validFrom);
+
     void closeMembership(UUID membershipId, Instant validTo, Instant closedAt, String closedBy);
 
     MerchantGroupMembership saveMembership(MerchantGroupMembership membership);

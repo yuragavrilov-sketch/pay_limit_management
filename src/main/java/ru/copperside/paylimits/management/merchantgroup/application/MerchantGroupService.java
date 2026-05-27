@@ -85,7 +85,7 @@ public class MerchantGroupService {
                 null
         );
 
-        return repository.findActiveMembership(merchantId, type.id(), validFrom)
+        return repository.findOverlappingMembership(merchantId, type.id(), validFrom)
                 .map(existing -> replaceExistingMembership(existing, validFrom, now, actor, membership))
                 .orElseGet(() -> repository.saveMembership(membership));
     }
@@ -97,6 +97,9 @@ public class MerchantGroupService {
             String actor,
             MerchantGroupMembership membership
     ) {
+        if (existing.validFrom().isAfter(validFrom)) {
+            throw problem("INVALID_MEMBERSHIP_PERIOD", "Assignment must not overlap future membership");
+        }
         if (existing.validTo() != null || existing.closedAt() != null) {
             throw problem("INVALID_MEMBERSHIP_PERIOD", "Assignment must not rewrite closed membership history");
         }

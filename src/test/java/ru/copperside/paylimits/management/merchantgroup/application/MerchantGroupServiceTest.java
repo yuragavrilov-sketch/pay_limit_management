@@ -221,6 +221,32 @@ class MerchantGroupServiceTest {
     }
 
     @Test
+    void rejectsAssignmentThatWouldOverlapFutureMembership() {
+        MerchantGroupType type = repository.addType("risk-tier", true);
+        MerchantGroup low = repository.addGroup(type.id(), "risk-low", true);
+        MerchantGroup high = repository.addGroup(type.id(), "risk-high", true);
+        MerchantGroupMembership future = repository.addMembership(
+                "502118",
+                low.id(),
+                type.id(),
+                Instant.parse("2026-05-28T09:00:00Z"),
+                null
+        );
+
+        assertThatThrownBy(() -> service.assignMembership(new AssignMembershipCommand(
+                "502118",
+                high.id(),
+                Instant.parse("2026-05-27T10:00:00Z"),
+                "alice"
+        )))
+                .isInstanceOf(MerchantGroupProblemException.class)
+                .hasMessageContaining("INVALID_MEMBERSHIP_PERIOD");
+
+        assertThat(repository.memberships).containsExactly(future);
+        assertThat(repository.closedMembershipId).isNull();
+    }
+
+    @Test
     void allowsConcurrentMembershipsInDifferentTypes() {
         MerchantGroupType riskType = repository.addType("risk-tier", true);
         MerchantGroupType segmentType = repository.addType("segment", true);
@@ -319,6 +345,16 @@ class MerchantGroupServiceTest {
                     .filter(membership -> membership.groupTypeId().equals(groupTypeId))
                     .filter(membership -> !membership.validFrom().isAfter(at))
                     .filter(membership -> membership.validTo() == null || membership.validTo().isAfter(at))
+                    .findFirst();
+        }
+
+        @Override
+        public Optional<MerchantGroupMembership> findOverlappingMembership(String merchantId, UUID groupTypeId, Instant validFrom) {
+            return memberships.stream()
+                    .filter(membership -> membership.merchantId().equals(merchantId))
+                    .filter(membership -> membership.groupTypeId().equals(groupTypeId))
+                    .filter(membership -> membership.validTo() == null || membership.validTo().isAfter(validFrom))
+                    .sorted((left, right) -> left.validFrom().compareTo(right.validFrom()))
                     .findFirst();
         }
 
