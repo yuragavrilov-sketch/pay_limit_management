@@ -1,8 +1,9 @@
+-- Migration role must be allowed to create btree_gist, or the extension must be pre-provisioned by DBA.
 create extension if not exists btree_gist;
 
 create schema if not exists limit_management;
 
-create table if not exists limit_management.merchant_group_types (
+create table limit_management.merchant_group_types (
     id uuid primary key,
     code varchar(64) not null,
     name varchar(160) not null,
@@ -16,7 +17,7 @@ create table if not exists limit_management.merchant_group_types (
     constraint merchant_group_types_name_not_blank check (length(trim(name)) > 0)
 );
 
-create table if not exists limit_management.merchant_groups (
+create table limit_management.merchant_groups (
     id uuid primary key,
     type_id uuid not null references limit_management.merchant_group_types (id),
     code varchar(64) not null,
@@ -31,7 +32,7 @@ create table if not exists limit_management.merchant_groups (
     constraint merchant_groups_name_not_blank check (length(trim(name)) > 0)
 );
 
-create table if not exists limit_management.merchant_group_memberships (
+create table limit_management.merchant_group_memberships (
     id uuid primary key,
     merchant_id varchar(64) not null,
     group_id uuid not null,

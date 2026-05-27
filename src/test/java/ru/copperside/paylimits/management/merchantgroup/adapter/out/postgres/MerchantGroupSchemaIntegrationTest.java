@@ -3,6 +3,7 @@ package ru.copperside.paylimits.management.merchantgroup.adapter.out.postgres;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
@@ -80,6 +81,7 @@ class MerchantGroupSchemaIntegrationTest {
                     (id, merchant_id, group_id, group_type_id, valid_from, valid_to, created_at, created_by)
                 values (?, '502118', ?, ?, ?, null, now(), 'test')
                 """, UUID.randomUUID(), groupId, typeId, Timestamp.from(Instant.parse("2026-05-27T10:00:00Z"))))
+                .isInstanceOf(DataIntegrityViolationException.class)
                 .hasMessageContaining("merchant_group_memberships_no_overlap");
     }
 }
