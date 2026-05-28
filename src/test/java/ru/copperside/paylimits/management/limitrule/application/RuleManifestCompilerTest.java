@@ -145,6 +145,45 @@ class RuleManifestCompilerTest {
     }
 
     @Test
+    void allowsSpecificRuleDirectionWhenOperationTypeSupportsAllDirections() {
+        repository.addActiveRule("RULE_C2C_OUT", typeSelector("SBP_C2C"), OperationDirection.OUT, noneSelector());
+
+        RuleManifest manifest = compiler.compile();
+
+        assertThat(manifest.ruleCount()).isEqualTo(1);
+        assertThat(repository.saved).containsExactly(manifest);
+    }
+
+    @Test
+    void rejectsAllRuleDirectionForSpecificOperationTypeDirection() {
+        repository.addActiveRule("RULE_BAD_ALL", typeSelector("SBP_C2B"), OperationDirection.ALL, noneSelector());
+
+        assertThatThrownBy(() -> compiler.compile())
+                .isInstanceOf(RuleManifestProblemException.class)
+                .hasMessageContaining("RULE_MANIFEST_CONFLICT")
+                .satisfies(error -> assertThat(((RuleManifestProblemException) error).diagnostics())
+                        .extracting(diagnostic -> diagnostic.code())
+                        .contains("MANIFEST_DIRECTION_CONFLICT"));
+
+        assertThat(repository.saved).isEmpty();
+    }
+
+    @Test
+    void rejectsInvalidOperationSelectorsWithoutRawNullPointerException() {
+        repository.addActiveRule("RULE_BAD_SELECTOR_A", null, OperationDirection.IN, noneSelector());
+        repository.addActiveRule("RULE_BAD_SELECTOR_B", new RuleSelector<>(null, null), OperationDirection.IN, noneSelector());
+
+        assertThatThrownBy(() -> compiler.compile())
+                .isInstanceOf(RuleManifestProblemException.class)
+                .hasMessageContaining("RULE_MANIFEST_CONFLICT")
+                .satisfies(error -> assertThat(((RuleManifestProblemException) error).diagnostics())
+                        .extracting(diagnostic -> diagnostic.code())
+                        .contains("MANIFEST_INVALID_RULE_DEFINITION"));
+
+        assertThat(repository.saved).isEmpty();
+    }
+
+    @Test
     void delegatesLatestManifestLookup() {
         repository.addActiveRule("RULE_A", typeSelector("SBP_C2B"), OperationDirection.IN, noneSelector());
         RuleManifest manifest = compiler.compile();
@@ -221,6 +260,7 @@ class RuleManifestCompilerTest {
                     List.of(
                             operationType("SBP_C2B", "SBP", OperationDirection.IN, true),
                             operationType("SBP_B2C", "SBP", OperationDirection.OUT, true),
+                            operationType("SBP_C2C", "SBP", OperationDirection.ALL, true),
                             operationType("ECOM", "CARD", OperationDirection.IN, true)
                     ),
                     List.of(item("MIR", paymentSystemsEnabled)),

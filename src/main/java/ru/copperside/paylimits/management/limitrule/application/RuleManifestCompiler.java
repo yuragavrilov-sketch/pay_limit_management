@@ -21,7 +21,6 @@ import ru.copperside.paylimits.management.limitrule.domain.RuleMetric;
 import ru.copperside.paylimits.management.limitrule.domain.RuleSelector;
 import ru.copperside.paylimits.management.limitrule.domain.RuleStatus;
 
-import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.time.Clock;
@@ -32,7 +31,6 @@ import java.util.HexFormat;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Optional;
 import java.util.UUID;
 import java.util.function.Function;
 import java.util.stream.Collectors;
@@ -67,8 +65,10 @@ public class RuleManifestCompiler {
 
         DictionaryIndex dictionaryIndex = new DictionaryIndex(dictionaries);
         validateRules(activeRules, compiledRules, dictionaryIndex, diagnostics);
-        detectDuplicateRules(compiledRules, diagnostics);
-        detectOperationScopeOverlaps(compiledRules, dictionaryIndex.operationTypesByCode(), diagnostics);
+        if (diagnostics.isEmpty()) {
+            detectDuplicateRules(compiledRules, diagnostics);
+            detectOperationScopeOverlaps(compiledRules, dictionaryIndex.operationTypesByCode(), diagnostics);
+        }
 
         if (!diagnostics.isEmpty()) {
             throw new RuleManifestProblemException(
@@ -220,7 +220,7 @@ public class RuleManifestCompiler {
             diagnostics.add(dictionaryDisabled(rule.id(), "Operation type", index, "matcher.operation"));
         }
         if (operationType.enabled()
-                && rule.direction() != OperationDirection.ALL
+                && operationType.direction() != OperationDirection.ALL
                 && operationType.direction() != rule.direction()) {
             diagnostics.add(diagnostic(
                     "MANIFEST_DIRECTION_CONFLICT",
