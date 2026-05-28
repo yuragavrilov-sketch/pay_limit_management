@@ -50,6 +50,19 @@ database config is loaded from Config Server branch `test`, and
 
 Health: [http://localhost:8084/actuator/health](http://localhost:8084/actuator/health)
 
+### Docker Compose contour
+
+The full local contour is owned by `../infra/docker-compose.yaml`.
+
+```powershell
+cd ..\infra
+docker compose up -d --build pay-limit-management
+```
+
+The container uses `SPRING_PROFILES_ACTIVE=compose`, Config Server label
+`compose`, Postgres at `postgres:5432`, and Vault secret
+`pay/compose/pay-limit-management-db-password`.
+
 OpenAPI:
 
 - [http://localhost:8084/v3/api-docs](http://localhost:8084/v3/api-docs)
