@@ -16,7 +16,7 @@ spring:
   datasource:
     url: ${PAY_LIMIT_MANAGEMENT_DB_URL:jdbc:postgresql://localhost:5432/pay_admin?currentSchema=limit_management}
     username: ${PAY_LIMIT_MANAGEMENT_DB_USERNAME:pay_admin}
-    password: ${PAY_LIMIT_MANAGEMENT_DB_PASSWORD:pay_admin}
+    password: ${PAY_LIMIT_MANAGEMENT_DB_PASSWORD:}
   flyway:
     enabled: ${PAY_LIMIT_MANAGEMENT_FLYWAY_ENABLED:true}
     schemas: limit_management
@@ -30,7 +30,7 @@ spring:
       kv:
         backend: ${VAULT_KV_BACKEND:pay}
         default-context: ""
-        application-name: ${VAULT_KV_CONTEXTS:}
+        application-name: ${VAULT_KV_CONTEXTS:${pay.environment}/${spring.application.name}-db-password}
         profiles: []
 
 management:

@@ -76,24 +76,68 @@ class MerchantGroupSchemaIntegrationTest {
     }
 
     @Test
-    void databaseRejectsTwoActiveLimitRuleVersionsForSameCode() {
-        UUID operationTypeId = UUID.fromString("11111111-1111-1111-1111-111111111111");
+    void flywayCreatesRuleDictionariesAndSelectorRules() {
+        Integer dictionaryCount = jdbcTemplate.queryForObject("""
+                select count(*)
+                from information_schema.tables
+                where table_schema = 'limit_management'
+                  and table_name in (
+                    'operation_families',
+                    'payment_systems',
+                    'issuer_countries',
+                    'issuer_banks',
+                    'bins',
+                    'card_types',
+                    'card_levels'
+                  )
+                """, Integer.class);
 
+        assertThat(dictionaryCount).isEqualTo(7);
+
+        List<String> families = jdbcTemplate.queryForList("""
+                select code
+                from limit_management.operation_families
+                order by code asc
+                """, String.class);
+
+        assertThat(families).contains("CARD", "SBP");
+
+        List<String> ruleColumns = jdbcTemplate.queryForList("""
+                select column_name
+                from information_schema.columns
+                where table_schema = 'limit_management'
+                  and table_name = 'limit_rules'
+                """, String.class);
+
+        assertThat(ruleColumns)
+                .contains(
+                        "operation_selector_type",
+                        "operation_selector_value",
+                        "attribute_selector_type",
+                        "attribute_selector_value"
+                )
+                .doesNotContain("operation_type_id");
+    }
+
+    @Test
+    void databaseRejectsTwoActiveLimitRuleVersionsForSameCode() {
         jdbcTemplate.update("""
                 insert into limit_management.limit_rules
-                    (id, code, version, name, operation_type_id, target_type, metric, period, currency,
+                    (id, code, version, name, operation_selector_type, operation_selector_value, direction,
+                     attribute_selector_type, attribute_selector_value, target_type, metric, period, currency,
                      status, created_at, updated_at, activated_at, disabled_at)
-                values (?, 'RULE_SBP_C2B_DAY', 1, 'SBP C2B daily amount', ?, 'PHONE', 'AMOUNT', 'DAY', 'RUB',
-                        'ACTIVE', now(), now(), now(), null)
-                """, UUID.randomUUID(), operationTypeId);
+                values (?, 'RULE_SBP_C2B_DAY', 1, 'SBP C2B daily amount', 'TYPE', 'SBP_C2B', 'IN',
+                        'NONE', null, 'PHONE', 'AMOUNT', 'DAY', 'RUB', 'ACTIVE', now(), now(), now(), null)
+                """, UUID.randomUUID());
 
         assertThatThrownBy(() -> jdbcTemplate.update("""
                 insert into limit_management.limit_rules
-                    (id, code, version, name, operation_type_id, target_type, metric, period, currency,
+                    (id, code, version, name, operation_selector_type, operation_selector_value, direction,
+                     attribute_selector_type, attribute_selector_value, target_type, metric, period, currency,
                      status, created_at, updated_at, activated_at, disabled_at)
-                values (?, 'RULE_SBP_C2B_DAY', 2, 'SBP C2B daily amount v2', ?, 'PHONE', 'AMOUNT', 'DAY', 'RUB',
-                        'ACTIVE', now(), now(), now(), null)
-                """, UUID.randomUUID(), operationTypeId))
+                values (?, 'RULE_SBP_C2B_DAY', 2, 'SBP C2B daily amount v2', 'TYPE', 'SBP_C2B', 'IN',
+                        'NONE', null, 'PHONE', 'AMOUNT', 'DAY', 'RUB', 'ACTIVE', now(), now(), now(), null)
+                """, UUID.randomUUID()))
                 .isInstanceOf(DataIntegrityViolationException.class)
                 .hasMessageContaining("limit_rules_one_active_per_code_uk");
     }

@@ -14,18 +14,26 @@ import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.web.servlet.MockMvc;
 import ru.copperside.paylimits.management.limitrule.application.LimitRuleService;
 import ru.copperside.paylimits.management.limitrule.application.port.out.LimitRuleRepository;
+import ru.copperside.paylimits.management.limitrule.domain.AttributeSelectorType;
+import ru.copperside.paylimits.management.limitrule.domain.DictionaryItem;
 import ru.copperside.paylimits.management.limitrule.domain.LimitRule;
+import ru.copperside.paylimits.management.limitrule.domain.LimitTargetType;
 import ru.copperside.paylimits.management.limitrule.domain.OperationDirection;
+import ru.copperside.paylimits.management.limitrule.domain.OperationSelectorType;
 import ru.copperside.paylimits.management.limitrule.domain.OperationType;
+import ru.copperside.paylimits.management.limitrule.domain.RuleDictionaries;
 import ru.copperside.paylimits.management.limitrule.domain.RuleMetric;
 import ru.copperside.paylimits.management.limitrule.domain.RulePeriod;
+import ru.copperside.paylimits.management.limitrule.domain.RuleSelector;
 import ru.copperside.paylimits.management.limitrule.domain.RuleStatus;
 
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 
 import static org.hamcrest.Matchers.nullValue;
@@ -60,7 +68,21 @@ class LimitRuleControllerTest {
 
         mockMvc.perform(get("/internal/v1/limit-management/operation-types"))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data[0].code").value("SBP_C2B"));
+                .andExpect(jsonPath("$.data[0].code").value("SBP_C2B"))
+                .andExpect(jsonPath("$.data[0].sortOrder").value(10));
+    }
+
+    @Test
+    void returnsRuleDictionaries() throws Exception {
+        repository.addOperationType("SBP_C2B", OperationDirection.IN, true);
+
+        mockMvc.perform(get("/internal/v1/limit-management/rule-dictionaries"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.operationFamilies[0].code").value("CARD"))
+                .andExpect(jsonPath("$.data.operationTypes[0].code").value("SBP_C2B"))
+                .andExpect(jsonPath("$.data.operationSelectorTypes[0]").value("ANY"))
+                .andExpect(jsonPath("$.data.attributeSelectorTypes[0]").value("NONE"))
+                .andExpect(jsonPath("$.error").value(nullValue()));
     }
 
     @Test
@@ -120,29 +142,53 @@ class LimitRuleControllerTest {
 
     @Test
     void createsDraftRule() throws Exception {
-        OperationType type = repository.addOperationType("SBP_C2B", OperationDirection.IN, true);
-
         mockMvc.perform(post("/internal/v1/limit-management/rules")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {
-                                  "code": "RULE_SBP_C2B_DAY",
-                                  "name": "SBP C2B daily amount",
-                                  "operationTypeId": "%s",
+                                  "code": "RULE_SBP_PHONE_DAY",
+                                  "name": "SBP phone daily amount",
+                                  "operationSelector": { "type": "FAMILY", "value": "SBP" },
+                                  "direction": "IN",
+                                  "attributeSelector": { "type": "PAYMENT_SYSTEM", "value": "MIR" },
+                                  "targetType": "PHONE",
                                   "metric": "AMOUNT",
-                                  "period": "DAY"
+                                  "period": "DAY",
+                                  "currency": "RUB"
                                 }
-                                """.formatted(type.id())))
+                                """))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.code").value("RULE_SBP_C2B_DAY"))
+                .andExpect(jsonPath("$.data.code").value("RULE_SBP_PHONE_DAY"))
                 .andExpect(jsonPath("$.data.version").value(1))
                 .andExpect(jsonPath("$.data.status").value("DRAFT"))
-                .andExpect(jsonPath("$.data.operationSelector.type").value("TYPE"))
-                .andExpect(jsonPath("$.data.operationSelector.value").value("SBP_C2B"))
-                .andExpect(jsonPath("$.data.attributeSelector.type").value("NONE"))
+                .andExpect(jsonPath("$.data.operationSelector.type").value("FAMILY"))
+                .andExpect(jsonPath("$.data.operationSelector.value").value("SBP"))
+                .andExpect(jsonPath("$.data.attributeSelector.type").value("PAYMENT_SYSTEM"))
+                .andExpect(jsonPath("$.data.attributeSelector.value").value("MIR"))
                 .andExpect(jsonPath("$.data.targetType").value("PHONE"))
                 .andExpect(jsonPath("$.data.currency").value("RUB"))
                 .andExpect(jsonPath("$.data.enabled").value(false));
+    }
+
+    @Test
+    void rejectsInvalidRuleSelector() throws Exception {
+        mockMvc.perform(post("/internal/v1/limit-management/rules")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "code": "RULE_UNKNOWN",
+                                  "name": "Unknown selector",
+                                  "operationSelector": { "type": "FAMILY", "value": "UNKNOWN" },
+                                  "direction": "IN",
+                                  "attributeSelector": { "type": "NONE", "value": null },
+                                  "targetType": "PHONE",
+                                  "metric": "AMOUNT",
+                                  "period": "DAY",
+                                  "currency": "RUB"
+                                }
+                                """))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error.code").value("RULE_SELECTOR_INVALID"));
     }
 
     @Test
@@ -166,23 +212,29 @@ class LimitRuleControllerTest {
 
     @Test
     void patchesDraftRule() throws Exception {
-        OperationType type = repository.addOperationType("SBP_C2B", OperationDirection.IN, true);
         LimitRule draft = repository.addDraftRule("RULE_SBP_C2B_DAY");
 
         mockMvc.perform(patch("/internal/v1/limit-management/rules/{ruleId}", draft.id())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {
-                                  "name": "Updated daily count",
-                                  "operationTypeId": "%s",
+                                  "name": "Updated monthly count",
+                                  "operationSelector": { "type": "ANY", "value": null },
+                                  "direction": "ALL",
+                                  "attributeSelector": { "type": "NONE", "value": null },
+                                  "targetType": "ANY",
                                   "metric": "COUNT",
-                                  "period": "MONTH"
+                                  "period": "MONTH",
+                                  "currency": null
                                 }
-                                """.formatted(type.id())))
+                                """))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.name").value("Updated daily count"))
+                .andExpect(jsonPath("$.data.name").value("Updated monthly count"))
+                .andExpect(jsonPath("$.data.operationSelector.type").value("ANY"))
+                .andExpect(jsonPath("$.data.targetType").value("ANY"))
                 .andExpect(jsonPath("$.data.metric").value("COUNT"))
-                .andExpect(jsonPath("$.data.period").value("MONTH"));
+                .andExpect(jsonPath("$.data.period").value("MONTH"))
+                .andExpect(jsonPath("$.data.currency").value(nullValue()));
     }
 
     @Test
@@ -237,13 +289,14 @@ class LimitRuleControllerTest {
         LimitRuleService limitRuleService(FakeRepository repository, java.time.Clock clock) {
             return new LimitRuleService(repository, clock);
         }
-
     }
 
     static class FakeRepository implements LimitRuleRepository {
 
         private final List<OperationType> operationTypes = new ArrayList<>();
         private final List<LimitRule> rules = new ArrayList<>();
+        private final Set<String> operationFamilies = Set.of("CARD", "SBP");
+        private final Set<String> paymentSystems = Set.of("MIR", "VISA");
 
         FakeRepository clear() {
             operationTypes.clear();
@@ -259,6 +312,7 @@ class LimitRuleControllerTest {
                     "SBP",
                     direction,
                     enabled,
+                    10,
                     Instant.parse("2026-05-27T09:00:00Z"),
                     Instant.parse("2026-05-27T09:00:00Z")
             );
@@ -267,32 +321,23 @@ class LimitRuleControllerTest {
         }
 
         LimitRule addDraftRule(String code) {
-            OperationType type = addOperationTypeIfAbsent("SBP_C2B", OperationDirection.IN, true);
-            return addRule(code, 1, type, RuleStatus.DRAFT);
+            return addRule(code, 1, RuleStatus.DRAFT);
         }
 
         LimitRule addActiveRule(String code) {
-            OperationType type = addOperationTypeIfAbsent("SBP_C2B", OperationDirection.IN, true);
-            return addRule(code, 1, type, RuleStatus.ACTIVE);
+            return addRule(code, 1, RuleStatus.ACTIVE);
         }
 
-        private OperationType addOperationTypeIfAbsent(String code, OperationDirection direction, boolean enabled) {
-            return operationTypes.stream()
-                    .filter(type -> type.code().equals(code))
-                    .findFirst()
-                    .orElseGet(() -> addOperationType(code, direction, enabled));
-        }
-
-        private LimitRule addRule(String code, int version, OperationType type, RuleStatus status) {
+        private LimitRule addRule(String code, int version, RuleStatus status) {
             LimitRule rule = new LimitRule(
                     UUID.randomUUID(),
                     code,
                     version,
                     code,
-                    type.id(),
-                    type.code(),
-                    type.direction(),
-                    "PHONE",
+                    new RuleSelector<>(OperationSelectorType.FAMILY, "SBP"),
+                    OperationDirection.IN,
+                    new RuleSelector<>(AttributeSelectorType.NONE, null),
+                    LimitTargetType.PHONE,
                     RuleMetric.AMOUNT,
                     RulePeriod.DAY,
                     "RUB",
@@ -312,8 +357,51 @@ class LimitRuleControllerTest {
         }
 
         @Override
+        public RuleDictionaries getRuleDictionaries() {
+            return new RuleDictionaries(
+                    dictionaryItems(operationFamilies),
+                    listOperationTypes(),
+                    dictionaryItems(paymentSystems),
+                    dictionaryItems(Set.of("RU")),
+                    dictionaryItems(Set.of("TKB")),
+                    dictionaryItems(Set.of("220220")),
+                    dictionaryItems(Set.of("DEBIT", "CREDIT")),
+                    dictionaryItems(Set.of("STANDARD", "GOLD")),
+                    Arrays.asList(OperationDirection.values()),
+                    Arrays.asList(OperationSelectorType.values()),
+                    Arrays.asList(AttributeSelectorType.values()),
+                    Arrays.asList(LimitTargetType.values()),
+                    Arrays.asList(RuleMetric.values()),
+                    Arrays.asList(RulePeriod.values())
+            );
+        }
+
+        @Override
         public Optional<OperationType> findOperationType(UUID id) {
             return operationTypes.stream().filter(type -> type.id().equals(id)).findFirst();
+        }
+
+        @Override
+        public Optional<OperationType> findOperationTypeByCode(String code) {
+            return operationTypes.stream().filter(type -> type.code().equals(code)).findFirst();
+        }
+
+        @Override
+        public boolean operationFamilyExists(String code) {
+            return operationFamilies.contains(code);
+        }
+
+        @Override
+        public boolean attributeValueExists(AttributeSelectorType type, String code) {
+            return switch (type) {
+                case NONE -> code == null;
+                case PAYMENT_SYSTEM -> paymentSystems.contains(code);
+                case ISSUER_COUNTRY -> "RU".equals(code);
+                case BANK -> "TKB".equals(code);
+                case BIN -> "220220".equals(code);
+                case CARD_TYPE -> Set.of("DEBIT", "CREDIT").contains(code);
+                case CARD_LEVEL -> Set.of("STANDARD", "GOLD").contains(code);
+            };
         }
 
         @Override
@@ -329,9 +417,12 @@ class LimitRuleControllerTest {
         }
 
         @Override
-        public boolean hasActiveRulesForOperationType(UUID operationTypeId) {
+        public boolean hasActiveRulesForOperationTypeCode(String operationTypeCode) {
             return rules.stream()
-                    .anyMatch(rule -> rule.operationTypeId().equals(operationTypeId) && rule.status() == RuleStatus.ACTIVE);
+                    .filter(rule -> rule.status() == RuleStatus.ACTIVE)
+                    .map(LimitRule::operationSelector)
+                    .anyMatch(selector -> selector.type() == OperationSelectorType.TYPE
+                            && operationTypeCode.equals(selector.value()));
         }
 
         @Override
@@ -379,6 +470,20 @@ class LimitRuleControllerTest {
         public LimitRule updateRule(LimitRule rule) {
             rules.replaceAll(existing -> existing.id().equals(rule.id()) ? rule : existing);
             return rule;
+        }
+
+        private List<DictionaryItem> dictionaryItems(Set<String> codes) {
+            return codes.stream()
+                    .sorted()
+                    .map(code -> new DictionaryItem(
+                            code,
+                            code,
+                            true,
+                            10,
+                            Instant.parse("2026-05-27T09:00:00Z"),
+                            Instant.parse("2026-05-27T09:00:00Z")
+                    ))
+                    .toList();
         }
     }
 }

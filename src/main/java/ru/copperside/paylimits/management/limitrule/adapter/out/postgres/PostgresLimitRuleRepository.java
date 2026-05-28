@@ -5,17 +5,24 @@ import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
 import ru.copperside.paylimits.management.limitrule.application.port.out.LimitRuleRepository;
+import ru.copperside.paylimits.management.limitrule.domain.AttributeSelectorType;
+import ru.copperside.paylimits.management.limitrule.domain.DictionaryItem;
 import ru.copperside.paylimits.management.limitrule.domain.LimitRule;
 import ru.copperside.paylimits.management.limitrule.domain.LimitRuleProblemException;
+import ru.copperside.paylimits.management.limitrule.domain.LimitTargetType;
 import ru.copperside.paylimits.management.limitrule.domain.OperationDirection;
+import ru.copperside.paylimits.management.limitrule.domain.OperationSelectorType;
 import ru.copperside.paylimits.management.limitrule.domain.OperationType;
+import ru.copperside.paylimits.management.limitrule.domain.RuleDictionaries;
 import ru.copperside.paylimits.management.limitrule.domain.RuleMetric;
 import ru.copperside.paylimits.management.limitrule.domain.RulePeriod;
+import ru.copperside.paylimits.management.limitrule.domain.RuleSelector;
 import ru.copperside.paylimits.management.limitrule.domain.RuleStatus;
 
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Timestamp;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -33,19 +40,66 @@ public class PostgresLimitRuleRepository implements LimitRuleRepository {
     @Override
     public List<OperationType> listOperationTypes() {
         return jdbcTemplate.query("""
-                select id, code, name, family_code, direction, enabled, created_at, updated_at
+                select id, code, name, family_code, direction, enabled, sort_order, created_at, updated_at
                 from limit_management.operation_types
-                order by code asc
+                order by sort_order asc, code asc
                 """, (rs, rowNum) -> mapOperationType(rs));
+    }
+
+    @Override
+    public RuleDictionaries getRuleDictionaries() {
+        return new RuleDictionaries(
+                listDictionary("operation_families"),
+                listOperationTypes(),
+                listDictionary("payment_systems"),
+                listDictionary("issuer_countries"),
+                listDictionary("issuer_banks"),
+                listDictionary("bins"),
+                listDictionary("card_types"),
+                listDictionary("card_levels"),
+                Arrays.asList(OperationDirection.values()),
+                Arrays.asList(OperationSelectorType.values()),
+                Arrays.asList(AttributeSelectorType.values()),
+                Arrays.asList(LimitTargetType.values()),
+                Arrays.asList(RuleMetric.values()),
+                Arrays.asList(RulePeriod.values())
+        );
     }
 
     @Override
     public Optional<OperationType> findOperationType(UUID id) {
         return jdbcTemplate.query("""
-                select id, code, name, family_code, direction, enabled, created_at, updated_at
+                select id, code, name, family_code, direction, enabled, sort_order, created_at, updated_at
                 from limit_management.operation_types
                 where id = ?
                 """, (rs, rowNum) -> mapOperationType(rs), id).stream().findFirst();
+    }
+
+    @Override
+    public Optional<OperationType> findOperationTypeByCode(String code) {
+        return jdbcTemplate.query("""
+                select id, code, name, family_code, direction, enabled, sort_order, created_at, updated_at
+                from limit_management.operation_types
+                where code = ?
+                """, (rs, rowNum) -> mapOperationType(rs), code).stream().findFirst();
+    }
+
+    @Override
+    public boolean operationFamilyExists(String code) {
+        return existsEnabledValue("operation_families", code);
+    }
+
+    @Override
+    public boolean attributeValueExists(AttributeSelectorType type, String code) {
+        return switch (type) {
+            case NONE -> code == null;
+            case PAYMENT_SYSTEM -> existsEnabledValue("payment_systems", code);
+            case ISSUER_COUNTRY -> existsEnabledValue("issuer_countries", code);
+            case BIN -> existsEnabledValue("bins", code);
+            case BANK -> existsEnabledValue("issuer_banks", code);
+            case CARD_TYPE -> existsEnabledValue("card_types", code);
+            case CARD_LEVEL -> existsEnabledValue("card_levels", code);
+        };
     }
 
     @Override
@@ -53,11 +107,11 @@ public class PostgresLimitRuleRepository implements LimitRuleRepository {
         try {
             jdbcTemplate.update("""
                     insert into limit_management.operation_types
-                        (id, code, name, family_code, direction, enabled, created_at, updated_at)
-                    values (?, ?, ?, ?, ?, ?, ?, ?)
+                        (id, code, name, family_code, direction, enabled, sort_order, created_at, updated_at)
+                    values (?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     type.id(), type.code(), type.name(), type.familyCode(), type.direction().name(), type.enabled(),
-                    Timestamp.from(type.createdAt()), Timestamp.from(type.updatedAt()));
+                    type.sortOrder(), Timestamp.from(type.createdAt()), Timestamp.from(type.updatedAt()));
             return type;
         } catch (DataIntegrityViolationException ex) {
             throw mapIntegrityViolation(ex);
@@ -69,10 +123,10 @@ public class PostgresLimitRuleRepository implements LimitRuleRepository {
         try {
             jdbcTemplate.update("""
                     update limit_management.operation_types
-                    set name = ?, family_code = ?, direction = ?, enabled = ?, updated_at = ?
+                    set name = ?, family_code = ?, direction = ?, enabled = ?, sort_order = ?, updated_at = ?
                     where id = ?
                     """,
-                    type.name(), type.familyCode(), type.direction().name(), type.enabled(),
+                    type.name(), type.familyCode(), type.direction().name(), type.enabled(), type.sortOrder(),
                     Timestamp.from(type.updatedAt()), type.id());
             return type;
         } catch (DataIntegrityViolationException ex) {
@@ -81,15 +135,16 @@ public class PostgresLimitRuleRepository implements LimitRuleRepository {
     }
 
     @Override
-    public boolean hasActiveRulesForOperationType(UUID operationTypeId) {
+    public boolean hasActiveRulesForOperationTypeCode(String operationTypeCode) {
         Boolean exists = jdbcTemplate.queryForObject("""
                 select exists (
                     select 1
                     from limit_management.limit_rules
-                    where operation_type_id = ?
+                    where operation_selector_type = 'TYPE'
+                      and operation_selector_value = ?
                       and status = 'ACTIVE'
                 )
-                """, Boolean.class, operationTypeId);
+                """, Boolean.class, operationTypeCode);
         return Boolean.TRUE.equals(exists);
     }
 
@@ -134,13 +189,16 @@ public class PostgresLimitRuleRepository implements LimitRuleRepository {
         try {
             jdbcTemplate.update("""
                     insert into limit_management.limit_rules
-                        (id, code, version, name, operation_type_id, target_type, metric, period, currency,
+                        (id, code, version, name, operation_selector_type, operation_selector_value, direction,
+                         attribute_selector_type, attribute_selector_value, target_type, metric, period, currency,
                          status, created_at, updated_at, activated_at, disabled_at)
-                    values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
-                    rule.id(), rule.code(), rule.version(), rule.name(), rule.operationTypeId(),
-                    rule.targetType(), rule.metric().name(), rule.period().name(), rule.currency(),
-                    rule.status().name(), Timestamp.from(rule.createdAt()), Timestamp.from(rule.updatedAt()),
+                    rule.id(), rule.code(), rule.version(), rule.name(),
+                    rule.operationSelector().type().name(), rule.operationSelector().value(), rule.direction().name(),
+                    rule.attributeSelector().type().name(), rule.attributeSelector().value(), rule.targetType().name(),
+                    rule.metric().name(), rule.period().name(), rule.currency(), rule.status().name(),
+                    Timestamp.from(rule.createdAt()), Timestamp.from(rule.updatedAt()),
                     toTimestamp(rule.activatedAt()), toTimestamp(rule.disabledAt()));
             return rule;
         } catch (DataIntegrityViolationException ex) {
@@ -153,13 +211,16 @@ public class PostgresLimitRuleRepository implements LimitRuleRepository {
         try {
             jdbcTemplate.update("""
                     update limit_management.limit_rules
-                    set name = ?, operation_type_id = ?, target_type = ?, metric = ?, period = ?, currency = ?,
-                        status = ?, updated_at = ?, activated_at = ?, disabled_at = ?
+                    set name = ?, operation_selector_type = ?, operation_selector_value = ?, direction = ?,
+                        attribute_selector_type = ?, attribute_selector_value = ?, target_type = ?, metric = ?,
+                        period = ?, currency = ?, status = ?, updated_at = ?, activated_at = ?, disabled_at = ?
                     where id = ?
                     """,
-                    rule.name(), rule.operationTypeId(), rule.targetType(), rule.metric().name(), rule.period().name(),
-                    rule.currency(), rule.status().name(), Timestamp.from(rule.updatedAt()),
-                    toTimestamp(rule.activatedAt()), toTimestamp(rule.disabledAt()), rule.id());
+                    rule.name(), rule.operationSelector().type().name(), rule.operationSelector().value(),
+                    rule.direction().name(), rule.attributeSelector().type().name(), rule.attributeSelector().value(),
+                    rule.targetType().name(), rule.metric().name(), rule.period().name(), rule.currency(),
+                    rule.status().name(), Timestamp.from(rule.updatedAt()), toTimestamp(rule.activatedAt()),
+                    toTimestamp(rule.disabledAt()), rule.id());
             return findRule(rule.id())
                     .orElseThrow(() -> new LimitRuleProblemException("RULE_NOT_FOUND", "Rule not found"));
         } catch (DataIntegrityViolationException ex) {
@@ -167,15 +228,46 @@ public class PostgresLimitRuleRepository implements LimitRuleRepository {
         }
     }
 
+    private List<DictionaryItem> listDictionary(String table) {
+        return jdbcTemplate.query("""
+                select code, name, enabled, sort_order, created_at, updated_at
+                from limit_management.%s
+                order by sort_order asc, code asc
+                """.formatted(table), (rs, rowNum) -> mapDictionaryItem(rs));
+    }
+
+    private boolean existsEnabledValue(String table, String code) {
+        Boolean exists = jdbcTemplate.queryForObject("""
+                select exists (
+                    select 1
+                    from limit_management.%s
+                    where code = ?
+                      and enabled = true
+                )
+                """.formatted(table), Boolean.class, code);
+        return Boolean.TRUE.equals(exists);
+    }
+
     private String ruleSelect() {
         return """
-                select r.id, r.code, r.version, r.name, r.operation_type_id,
-                       o.code as operation_type_code, o.direction,
+                select r.id, r.code, r.version, r.name,
+                       r.operation_selector_type, r.operation_selector_value, r.direction,
+                       r.attribute_selector_type, r.attribute_selector_value,
                        r.target_type, r.metric, r.period, r.currency, r.status,
                        r.created_at, r.updated_at, r.activated_at, r.disabled_at
                 from limit_management.limit_rules r
-                join limit_management.operation_types o on o.id = r.operation_type_id
                 """;
+    }
+
+    private DictionaryItem mapDictionaryItem(ResultSet rs) throws SQLException {
+        return new DictionaryItem(
+                rs.getString("code"),
+                rs.getString("name"),
+                rs.getBoolean("enabled"),
+                rs.getInt("sort_order"),
+                rs.getTimestamp("created_at").toInstant(),
+                rs.getTimestamp("updated_at").toInstant()
+        );
     }
 
     private OperationType mapOperationType(ResultSet rs) throws SQLException {
@@ -186,6 +278,7 @@ public class PostgresLimitRuleRepository implements LimitRuleRepository {
                 rs.getString("family_code"),
                 OperationDirection.valueOf(rs.getString("direction")),
                 rs.getBoolean("enabled"),
+                rs.getInt("sort_order"),
                 rs.getTimestamp("created_at").toInstant(),
                 rs.getTimestamp("updated_at").toInstant()
         );
@@ -199,10 +292,16 @@ public class PostgresLimitRuleRepository implements LimitRuleRepository {
                 rs.getString("code"),
                 rs.getInt("version"),
                 rs.getString("name"),
-                rs.getObject("operation_type_id", UUID.class),
-                rs.getString("operation_type_code"),
+                new RuleSelector<>(
+                        OperationSelectorType.valueOf(rs.getString("operation_selector_type")),
+                        rs.getString("operation_selector_value")
+                ),
                 OperationDirection.valueOf(rs.getString("direction")),
-                rs.getString("target_type"),
+                new RuleSelector<>(
+                        AttributeSelectorType.valueOf(rs.getString("attribute_selector_type")),
+                        rs.getString("attribute_selector_value")
+                ),
+                LimitTargetType.valueOf(rs.getString("target_type")),
                 RuleMetric.valueOf(rs.getString("metric")),
                 RulePeriod.valueOf(rs.getString("period")),
                 rs.getString("currency"),

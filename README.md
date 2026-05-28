@@ -1,10 +1,12 @@
 # pay-limit-management
 
-Administrative service skeleton for payment limits configuration.
+Administrative service for payment limits configuration.
 
 ## Scope
 
-This first increment provides the Spring Boot service shell, configuration wiring, actuator health endpoint, OpenAPI UI wiring, Docker build, and configuration property validation. It does not include domain controllers, persistence, or limit-management business logic yet.
+The service exposes limit catalog and rule administration APIs, stores data in
+Postgres schema `limit_management`, runs Flyway migrations, and follows the
+PAY_ALL Config Server + Vault configuration model.
 
 ## Stack
 
@@ -26,14 +28,25 @@ This first increment provides the Spring Boot service shell, configuration wirin
 | `CONFIG_SERVER_LABEL` | `${pay.environment}` | Config Server Git label |
 | `VAULT_ENABLED` | `false` locally, `true` in test/prod | Enables Vault Config |
 | `VAULT_KV_BACKEND` | `pay` | Vault KV backend |
-| `VAULT_KV_CONTEXTS` | empty | Vault application contexts |
+| `VAULT_KV_CONTEXTS` | `${PAY_ENVIRONMENT}/pay-limit-management-db-password` | Vault application contexts |
+| `PAY_LIMIT_MANAGEMENT_DB_URL` | `jdbc:postgresql://localhost:5432/pay_admin?currentSchema=limit_management` | Local fallback DB URL |
+| `PAY_LIMIT_MANAGEMENT_DB_USERNAME` | `pay_admin` | Local fallback DB user |
+| `PAY_LIMIT_MANAGEMENT_DB_PASSWORD` | empty | Local fallback DB password; test/profile runs load it from Vault |
 | `PAY_LIMIT_MANAGEMENT_SERVICE_NAME` | `Limit Management` | Display name for this service |
 
 ## Run
 
+Local standalone run keeps Config Server and Vault disabled and uses local
+defaults or `PAY_LIMIT_MANAGEMENT_DB_*` environment overrides:
+
 ```powershell
 mvn spring-boot:run
 ```
+
+Full test-profile startup is owned by `../infra/run-test.ps1`: non-secret
+database config is loaded from Config Server branch `test`, and
+`spring.datasource.password` is loaded from Vault path
+`pay/test/pay-limit-management-db-password`.
 
 Health: [http://localhost:8084/actuator/health](http://localhost:8084/actuator/health)
 

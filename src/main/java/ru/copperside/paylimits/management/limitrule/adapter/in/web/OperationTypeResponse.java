@@ -12,6 +12,7 @@ public record OperationTypeResponse(
         String familyCode,
         String direction,
         boolean enabled,
+        int sortOrder,
         Instant createdAt,
         Instant updatedAt
 ) {
@@ -23,6 +24,7 @@ public record OperationTypeResponse(
                 type.familyCode(),
                 type.direction().name(),
                 type.enabled(),
+                type.sortOrder(),
                 type.createdAt(),
                 type.updatedAt()
         );

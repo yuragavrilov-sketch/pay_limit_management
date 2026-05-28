@@ -8,11 +8,18 @@ import org.springframework.test.context.DynamicPropertySource;
 import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
+import ru.copperside.paylimits.management.limitrule.domain.AttributeSelectorType;
+import ru.copperside.paylimits.management.limitrule.domain.DictionaryItem;
 import ru.copperside.paylimits.management.limitrule.domain.LimitRule;
 import ru.copperside.paylimits.management.limitrule.domain.LimitRuleProblemException;
+import ru.copperside.paylimits.management.limitrule.domain.LimitTargetType;
+import ru.copperside.paylimits.management.limitrule.domain.OperationDirection;
+import ru.copperside.paylimits.management.limitrule.domain.OperationSelectorType;
 import ru.copperside.paylimits.management.limitrule.domain.OperationType;
+import ru.copperside.paylimits.management.limitrule.domain.RuleDictionaries;
 import ru.copperside.paylimits.management.limitrule.domain.RuleMetric;
 import ru.copperside.paylimits.management.limitrule.domain.RulePeriod;
+import ru.copperside.paylimits.management.limitrule.domain.RuleSelector;
 import ru.copperside.paylimits.management.limitrule.domain.RuleStatus;
 
 import java.time.Instant;
@@ -43,61 +50,78 @@ class PostgresLimitRuleRepositoryIntegrationTest {
     private PostgresLimitRuleRepository repository;
 
     @Test
+    void listsRuleDictionaries() {
+        RuleDictionaries dictionaries = repository.getRuleDictionaries();
+
+        assertThat(dictionaries.operationFamilies()).extracting(DictionaryItem::code).contains("SBP", "CARD");
+        assertThat(dictionaries.operationTypes()).extracting(OperationType::code)
+                .contains("SBP_C2B", "SBP_B2C", "ECOM", "AFT", "OCT");
+        assertThat(dictionaries.paymentSystems()).extracting(DictionaryItem::code).contains("MIR", "VISA");
+        assertThat(dictionaries.attributeSelectorTypes()).contains(AttributeSelectorType.PAYMENT_SYSTEM);
+    }
+
+    @Test
     void listsSeededOperationTypes() {
         List<OperationType> types = repository.listOperationTypes();
 
         assertThat(types).extracting(OperationType::code).contains("SBP_C2B", "SBP_B2C");
+        assertThat(types).allSatisfy(type -> assertThat(type.sortOrder()).isGreaterThanOrEqualTo(0));
     }
 
     @Test
     void savesAndActivatesVersionedRule() {
-        OperationType type = repository.listOperationTypes().stream()
-                .filter(operationType -> operationType.code().equals("SBP_C2B"))
-                .findFirst()
-                .orElseThrow();
-
-        LimitRule draft = new LimitRule(
-                UUID.randomUUID(),
+        LimitRule draft = rule(
+                typeSelector("SBP_C2B"),
+                OperationDirection.IN,
+                new RuleSelector<>(AttributeSelectorType.NONE, null),
                 "RULE_SBP_C2B_DAY",
                 1,
-                "SBP C2B daily amount",
-                type.id(),
-                type.code(),
-                type.direction(),
-                "PHONE",
-                RuleMetric.AMOUNT,
-                RulePeriod.DAY,
-                "RUB",
                 RuleStatus.DRAFT,
-                Instant.parse("2026-05-27T09:00:00Z"),
-                Instant.parse("2026-05-27T09:00:00Z"),
-                null,
-                null
+                RuleMetric.AMOUNT,
+                "RUB",
+                Instant.parse("2026-05-27T09:00:00Z")
         );
 
         repository.saveRule(draft);
         LimitRule active = repository.updateRule(new LimitRule(
-                draft.id(), draft.code(), draft.version(), draft.name(), draft.operationTypeId(),
-                draft.operationTypeCode(), draft.direction(), draft.targetType(), draft.metric(), draft.period(),
+                draft.id(), draft.code(), draft.version(), draft.name(), draft.operationSelector(),
+                draft.direction(), draft.attributeSelector(), draft.targetType(), draft.metric(), draft.period(),
                 draft.currency(), RuleStatus.ACTIVE, draft.createdAt(), Instant.parse("2026-05-27T10:00:00Z"),
                 Instant.parse("2026-05-27T10:00:00Z"), null
         ));
 
         assertThat(repository.findRule(draft.id())).contains(active);
         assertThat(repository.findActiveByCode(draft.code())).contains(active);
-        assertThat(repository.hasActiveRulesForOperationType(type.id())).isTrue();
+        assertThat(repository.hasActiveRulesForOperationTypeCode("SBP_C2B")).isTrue();
+    }
+
+    @Test
+    void savesFamilyAndAttributeSelectorRule() {
+        LimitRule draft = rule(
+                new RuleSelector<>(OperationSelectorType.FAMILY, "CARD"),
+                OperationDirection.IN,
+                new RuleSelector<>(AttributeSelectorType.PAYMENT_SYSTEM, "MIR"),
+                "RULE_CARD_MIR_DAY",
+                1,
+                RuleStatus.DRAFT,
+                RuleMetric.AMOUNT,
+                "RUB",
+                Instant.parse("2026-05-27T09:00:00Z")
+        );
+
+        repository.saveRule(draft);
+
+        assertThat(repository.findRule(draft.id())).contains(draft);
     }
 
     @Test
     void nextVersionUsesPersistedRuleVersions() {
-        OperationType type = repository.listOperationTypes().stream()
-                .filter(operationType -> operationType.code().equals("SBP_B2C"))
-                .findFirst()
-                .orElseThrow();
         Instant now = Instant.parse("2026-05-27T09:00:00Z");
 
-        repository.saveRule(rule(type, "RULE_SBP_B2C_COUNT_WEEK", 1, RuleStatus.DISABLED, RuleMetric.COUNT, null, now));
-        repository.saveRule(rule(type, "RULE_SBP_B2C_COUNT_WEEK", 2, RuleStatus.DRAFT, RuleMetric.COUNT, null, now));
+        repository.saveRule(rule(anyOperationSelector(), OperationDirection.OUT, noneSelector(),
+                "RULE_SBP_B2C_COUNT_WEEK", 1, RuleStatus.DISABLED, RuleMetric.COUNT, null, now));
+        repository.saveRule(rule(anyOperationSelector(), OperationDirection.OUT, noneSelector(),
+                "RULE_SBP_B2C_COUNT_WEEK", 2, RuleStatus.DRAFT, RuleMetric.COUNT, null, now));
 
         assertThat(repository.nextVersion("RULE_SBP_B2C_COUNT_WEEK")).isEqualTo(3);
         assertThat(repository.nextVersion("RULE_NEW")).isEqualTo(1);
@@ -105,35 +129,30 @@ class PostgresLimitRuleRepositoryIntegrationTest {
 
     @Test
     void mapsDuplicateDraftRuleToProblemCode() {
-        OperationType type = repository.listOperationTypes().stream()
-                .filter(operationType -> operationType.code().equals("SBP_C2B"))
-                .findFirst()
-                .orElseThrow();
         Instant now = Instant.parse("2026-05-27T09:00:00Z");
-        repository.saveRule(rule(type, "RULE_SBP_C2B_COUNT_DAY", 1, RuleStatus.DRAFT, RuleMetric.COUNT, null, now));
+        repository.saveRule(rule(anyOperationSelector(), OperationDirection.ALL, noneSelector(),
+                "RULE_SBP_COUNT_DAY", 1, RuleStatus.DRAFT, RuleMetric.COUNT, null, now));
 
-        assertThatThrownBy(() -> repository.saveRule(
-                rule(type, "RULE_SBP_C2B_COUNT_DAY", 2, RuleStatus.DRAFT, RuleMetric.COUNT, null, now)))
+        assertThatThrownBy(() -> repository.saveRule(rule(anyOperationSelector(), OperationDirection.ALL, noneSelector(),
+                "RULE_SBP_COUNT_DAY", 2, RuleStatus.DRAFT, RuleMetric.COUNT, null, now)))
                 .isInstanceOf(LimitRuleProblemException.class)
                 .hasMessageContaining("RULE_DRAFT_EXISTS");
     }
 
     @Test
     void mapsInvalidRuleDefinitionToProblemCode() {
-        OperationType type = repository.listOperationTypes().stream()
-                .filter(operationType -> operationType.code().equals("SBP_C2B"))
-                .findFirst()
-                .orElseThrow();
         Instant now = Instant.parse("2026-05-27T09:00:00Z");
 
-        assertThatThrownBy(() -> repository.saveRule(
-                rule(type, "RULE_SBP_C2B_COUNT_MONTH", 1, RuleStatus.DRAFT, RuleMetric.COUNT, "RUB", now)))
+        assertThatThrownBy(() -> repository.saveRule(rule(anyOperationSelector(), OperationDirection.ALL, noneSelector(),
+                "RULE_SBP_COUNT_MONTH", 1, RuleStatus.DRAFT, RuleMetric.COUNT, "RUB", now)))
                 .isInstanceOf(LimitRuleProblemException.class)
                 .hasMessageContaining("INVALID_RULE_DEFINITION");
     }
 
     private LimitRule rule(
-            OperationType type,
+            RuleSelector<OperationSelectorType> operationSelector,
+            OperationDirection direction,
+            RuleSelector<AttributeSelectorType> attributeSelector,
             String code,
             int version,
             RuleStatus status,
@@ -148,10 +167,10 @@ class PostgresLimitRuleRepositoryIntegrationTest {
                 code,
                 version,
                 code,
-                type.id(),
-                type.code(),
-                type.direction(),
-                "PHONE",
+                operationSelector,
+                direction,
+                attributeSelector,
+                LimitTargetType.PHONE,
                 metric,
                 RulePeriod.DAY,
                 currency,
@@ -161,5 +180,17 @@ class PostgresLimitRuleRepositoryIntegrationTest {
                 activatedAt,
                 disabledAt
         );
+    }
+
+    private static RuleSelector<OperationSelectorType> anyOperationSelector() {
+        return new RuleSelector<>(OperationSelectorType.ANY, null);
+    }
+
+    private static RuleSelector<OperationSelectorType> typeSelector(String value) {
+        return new RuleSelector<>(OperationSelectorType.TYPE, value);
+    }
+
+    private static RuleSelector<AttributeSelectorType> noneSelector() {
+        return new RuleSelector<>(AttributeSelectorType.NONE, null);
     }
 }
