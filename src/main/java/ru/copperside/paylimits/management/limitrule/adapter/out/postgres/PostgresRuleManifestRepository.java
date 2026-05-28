@@ -9,6 +9,7 @@ import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnExpression;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
+import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Transactional;
 import ru.copperside.paylimits.management.limitrule.application.RuleManifestCanonicalJson;
 import ru.copperside.paylimits.management.limitrule.application.port.out.RuleManifestRepository;
@@ -87,7 +88,7 @@ public class PostgresRuleManifestRepository implements RuleManifestRepository {
     }
 
     @Override
-    @Transactional
+    @Transactional(isolation = Isolation.REPEATABLE_READ)
     public RuleManifest saveCompiledManifest(CompiledManifestFactory factory) {
         jdbcTemplate.execute("lock table limit_management.rule_manifests in exclusive mode");
         Integer maxVersion = jdbcTemplate.queryForObject("""
@@ -125,6 +126,9 @@ public class PostgresRuleManifestRepository implements RuleManifestRepository {
             throw new IllegalArgumentException("Rule manifest payload must be present");
         }
         RuleManifestPayload payload = manifest.payload();
+        if (payload.rules() == null || payload.ruleCount() != payload.rules().size()) {
+            throw new IllegalArgumentException("Rule manifest payload rule count does not match rules size");
+        }
         if (manifest.version() != payload.version()
                 || manifest.status() != payload.status()
                 || manifest.ruleCount() != payload.ruleCount()

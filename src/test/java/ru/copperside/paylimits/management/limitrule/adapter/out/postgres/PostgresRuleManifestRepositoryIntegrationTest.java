@@ -110,6 +110,19 @@ class PostgresRuleManifestRepositoryIntegrationTest {
     }
 
     @Test
+    void compilesManifestUsingRepeatableReadSnapshot() {
+        Instant now = Instant.parse("2026-05-28T09:00:00Z");
+        LimitRule rule = rule("RULE_MANIFEST_SNAPSHOT", 1, RuleStatus.ACTIVE, now);
+        ruleRepository.saveRule(rule);
+
+        manifestRepository.saveCompiledManifest((version, activeRules, dictionaries) -> {
+            String isolation = jdbcTemplate.queryForObject("show transaction_isolation", String.class);
+            assertThat(isolation).isEqualTo("repeatable read");
+            return manifest(rule, version);
+        });
+    }
+
+    @Test
     void rejectsPayloadDriftBeforeInsert() {
         Instant now = Instant.parse("2026-05-28T09:00:00Z");
         LimitRule rule = rule("RULE_MANIFEST_DRIFT", 1, RuleStatus.ACTIVE, now);
@@ -140,6 +153,41 @@ class PostgresRuleManifestRepositoryIntegrationTest {
         }))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("payload");
+
+        assertThat(manifestRepository.findLatestManifest()).isEmpty();
+    }
+
+    @Test
+    void rejectsPayloadRuleCountThatDoesNotMatchRuleListSize() {
+        Instant now = Instant.parse("2026-05-28T09:00:00Z");
+        LimitRule rule = rule("RULE_MANIFEST_RULE_COUNT", 1, RuleStatus.ACTIVE, now);
+        ruleRepository.saveRule(rule);
+
+        assertThatThrownBy(() -> manifestRepository.saveCompiledManifest((version, activeRules, dictionaries) -> {
+            RuleManifest manifest = manifest(rule, version);
+            RuleManifestPayload payload = manifest.payload();
+            RuleManifestPayload driftedPayload = new RuleManifestPayload(
+                    payload.version(),
+                    payload.status(),
+                    payload.ruleCount() + 1,
+                    payload.createdAt(),
+                    payload.rules(),
+                    payload.diagnostics()
+            );
+            return new RuleManifest(
+                    manifest.id(),
+                    manifest.version(),
+                    manifest.status(),
+                    canonicalJson.checksum(driftedPayload),
+                    driftedPayload.ruleCount(),
+                    manifest.createdAt(),
+                    manifest.rules(),
+                    manifest.diagnostics(),
+                    driftedPayload
+            );
+        }))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("rule count");
 
         assertThat(manifestRepository.findLatestManifest()).isEmpty();
     }
