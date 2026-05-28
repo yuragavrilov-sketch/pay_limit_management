@@ -43,6 +43,20 @@ defaults or `PAY_LIMIT_MANAGEMENT_DB_*` environment overrides:
 mvn spring-boot:run
 ```
 
+## Rule manifests
+
+`POST /internal/v1/limit-management/rule-manifests` compiles all `ACTIVE`
+rules into a versioned manifest for future `pay-limit-engine` consumption.
+
+The compiler stores only valid manifests. It rejects duplicate matcher/measure
+definitions, ambiguous `ANY`/`FAMILY`/`TYPE` operation overlaps, disabled or
+missing dictionary values, and incompatible operation type directions.
+
+Read endpoints:
+
+- `GET /internal/v1/limit-management/rule-manifests/latest`
+- `GET /internal/v1/limit-management/rule-manifests/{manifestId}`
+
 Full test-profile startup is owned by `../infra/run-test.ps1`: non-secret
 database config is loaded from Config Server branch `test`, and
 `spring.datasource.password` is loaded from Vault path
