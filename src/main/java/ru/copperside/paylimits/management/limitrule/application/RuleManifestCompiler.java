@@ -1,7 +1,5 @@
 package ru.copperside.paylimits.management.limitrule.application;
 
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import ru.copperside.paylimits.management.limitrule.application.port.out.RuleManifestRepository;
 import ru.copperside.paylimits.management.limitrule.domain.AttributeSelectorType;
 import ru.copperside.paylimits.management.limitrule.domain.CompiledRule;
@@ -15,19 +13,17 @@ import ru.copperside.paylimits.management.limitrule.domain.OperationSelectorType
 import ru.copperside.paylimits.management.limitrule.domain.OperationType;
 import ru.copperside.paylimits.management.limitrule.domain.RuleDictionaries;
 import ru.copperside.paylimits.management.limitrule.domain.RuleManifest;
+import ru.copperside.paylimits.management.limitrule.domain.RuleManifestPayload;
 import ru.copperside.paylimits.management.limitrule.domain.RuleManifestProblemException;
 import ru.copperside.paylimits.management.limitrule.domain.RuleManifestStatus;
 import ru.copperside.paylimits.management.limitrule.domain.RuleMetric;
 import ru.copperside.paylimits.management.limitrule.domain.RuleSelector;
 import ru.copperside.paylimits.management.limitrule.domain.RuleStatus;
 
-import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
 import java.time.Clock;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Comparator;
-import java.util.HexFormat;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -41,12 +37,16 @@ public class RuleManifestCompiler {
 
     private final RuleManifestRepository repository;
     private final Clock clock;
-    private final ObjectMapper objectMapper;
+    private final RuleManifestCanonicalJson canonicalJson;
 
-    public RuleManifestCompiler(RuleManifestRepository repository, Clock clock, ObjectMapper objectMapper) {
+    public RuleManifestCompiler(RuleManifestRepository repository, Clock clock) {
+        this(repository, clock, new RuleManifestCanonicalJson());
+    }
+
+    RuleManifestCompiler(RuleManifestRepository repository, Clock clock, RuleManifestCanonicalJson canonicalJson) {
         this.repository = repository;
         this.clock = clock;
-        this.objectMapper = objectMapper;
+        this.canonicalJson = canonicalJson;
     }
 
     public RuleManifest compile() {
@@ -78,20 +78,7 @@ public class RuleManifestCompiler {
             );
         }
 
-        int version = repository.nextManifestVersion();
-        Instant createdAt = Instant.now(clock);
-        String checksum = checksum(version, createdAt, compiledRules);
-        RuleManifest manifest = new RuleManifest(
-                UUID.randomUUID(),
-                version,
-                RuleManifestStatus.VALID,
-                checksum,
-                compiledRules.size(),
-                createdAt,
-                compiledRules,
-                List.of()
-        );
-        return repository.saveManifest(manifest);
+        return repository.saveNextManifest(version -> buildManifest(version, compiledRules));
     }
 
     public RuleManifest getLatest() {
@@ -350,21 +337,27 @@ public class RuleManifestCompiler {
         return operationType != null && familySelector.value().equals(operationType.familyCode());
     }
 
-    private String checksum(int version, Instant createdAt, List<CompiledRule> compiledRules) {
-        Map<String, Object> payload = new LinkedHashMap<>();
-        payload.put("version", version);
-        payload.put("status", RuleManifestStatus.VALID);
-        payload.put("ruleCount", compiledRules.size());
-        payload.put("createdAt", createdAt);
-        payload.put("rules", compiledRules);
-        payload.put("diagnostics", List.of());
-        try {
-            byte[] json = objectMapper.writeValueAsBytes(payload);
-            MessageDigest digest = MessageDigest.getInstance("SHA-256");
-            return "sha256:" + HexFormat.of().formatHex(digest.digest(json));
-        } catch (JsonProcessingException | NoSuchAlgorithmException e) {
-            throw new IllegalStateException("Cannot calculate rule manifest checksum", e);
-        }
+    private RuleManifest buildManifest(int version, List<CompiledRule> compiledRules) {
+        Instant createdAt = Instant.now(clock);
+        RuleManifestPayload payload = new RuleManifestPayload(
+                version,
+                RuleManifestStatus.VALID,
+                compiledRules.size(),
+                createdAt,
+                compiledRules,
+                List.of()
+        );
+        return new RuleManifest(
+                UUID.randomUUID(),
+                payload.version(),
+                payload.status(),
+                canonicalJson.checksum(payload),
+                payload.ruleCount(),
+                payload.createdAt(),
+                payload.rules(),
+                payload.diagnostics(),
+                payload
+        );
     }
 
     private ManifestDiagnostic dictionaryMissing(UUID ruleId, String label, int index, String path) {

@@ -5,7 +5,7 @@ import java.util.List;
 public class RuleManifestProblemException extends RuntimeException {
 
     private final String code;
-    private final List<ManifestDiagnostic> diagnostics;
+    private final RuleManifestDiagnosticsDetails details;
 
     public RuleManifestProblemException(String code, String message) {
         this(code, message, List.of());
@@ -14,7 +14,7 @@ public class RuleManifestProblemException extends RuntimeException {
     public RuleManifestProblemException(String code, String message, List<ManifestDiagnostic> diagnostics) {
         super(code + ": " + message);
         this.code = code;
-        this.diagnostics = List.copyOf(diagnostics);
+        this.details = new RuleManifestDiagnosticsDetails(diagnostics);
     }
 
     public String code() {
@@ -22,6 +22,10 @@ public class RuleManifestProblemException extends RuntimeException {
     }
 
     public List<ManifestDiagnostic> diagnostics() {
-        return diagnostics;
+        return details.diagnostics();
+    }
+
+    public RuleManifestDiagnosticsDetails details() {
+        return details;
     }
 }

@@ -1,7 +1,5 @@
 package ru.copperside.paylimits.management.limitrule.application;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import ru.copperside.paylimits.management.limitrule.application.port.out.RuleManifestRepository;
@@ -14,6 +12,7 @@ import ru.copperside.paylimits.management.limitrule.domain.OperationDirection;
 import ru.copperside.paylimits.management.limitrule.domain.OperationSelectorType;
 import ru.copperside.paylimits.management.limitrule.domain.OperationType;
 import ru.copperside.paylimits.management.limitrule.domain.RuleDictionaries;
+import ru.copperside.paylimits.management.limitrule.domain.RuleManifestDiagnosticsDetails;
 import ru.copperside.paylimits.management.limitrule.domain.RuleManifest;
 import ru.copperside.paylimits.management.limitrule.domain.RuleManifestProblemException;
 import ru.copperside.paylimits.management.limitrule.domain.RuleManifestStatus;
@@ -30,6 +29,7 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.function.Function;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -45,8 +45,7 @@ class RuleManifestCompilerTest {
     @BeforeEach
     void setUp() {
         repository = new FakeManifestRepository();
-        ObjectMapper objectMapper = new ObjectMapper().registerModule(new JavaTimeModule());
-        compiler = new RuleManifestCompiler(repository, CLOCK, objectMapper);
+        compiler = new RuleManifestCompiler(repository, CLOCK);
     }
 
     @Test
@@ -65,6 +64,13 @@ class RuleManifestCompilerTest {
         assertThat(manifest.rules()).extracting(CompiledRule::ruleId).containsExactly(first.id(), second.id());
         assertThat(manifest.rules().getFirst().matcher().operation().type()).isEqualTo(OperationSelectorType.TYPE);
         assertThat(manifest.diagnostics()).isEmpty();
+        assertThat(manifest.payload()).isNotNull();
+        assertThat(manifest.payload().version()).isEqualTo(manifest.version());
+        assertThat(manifest.payload().status()).isEqualTo(manifest.status());
+        assertThat(manifest.payload().ruleCount()).isEqualTo(manifest.ruleCount());
+        assertThat(manifest.payload().createdAt()).isEqualTo(manifest.createdAt());
+        assertThat(manifest.payload().rules()).isEqualTo(manifest.rules());
+        assertThat(manifest.payload().diagnostics()).isEqualTo(manifest.diagnostics());
         assertThat(repository.saved).containsExactly(manifest);
     }
 
@@ -88,9 +94,13 @@ class RuleManifestCompilerTest {
         assertThatThrownBy(() -> compiler.compile())
                 .isInstanceOf(RuleManifestProblemException.class)
                 .hasMessageContaining("RULE_MANIFEST_CONFLICT")
-                .satisfies(error -> assertThat(((RuleManifestProblemException) error).diagnostics())
-                        .extracting(diagnostic -> diagnostic.code())
-                        .contains("MANIFEST_DUPLICATE_RULE"));
+                .satisfies(error -> {
+                    RuleManifestProblemException problem = (RuleManifestProblemException) error;
+                    assertThat(problem.details()).isInstanceOf(RuleManifestDiagnosticsDetails.class);
+                    assertThat(problem.diagnostics())
+                            .extracting(diagnostic -> diagnostic.code())
+                            .contains("MANIFEST_DUPLICATE_RULE");
+                });
 
         assertThat(repository.saved).isEmpty();
     }
@@ -279,12 +289,8 @@ class RuleManifestCompilerTest {
         }
 
         @Override
-        public int nextManifestVersion() {
-            return nextVersion++;
-        }
-
-        @Override
-        public RuleManifest saveManifest(RuleManifest manifest) {
+        public RuleManifest saveNextManifest(Function<Integer, RuleManifest> manifestFactory) {
+            RuleManifest manifest = manifestFactory.apply(nextVersion++);
             saved.add(manifest);
             return manifest;
         }
