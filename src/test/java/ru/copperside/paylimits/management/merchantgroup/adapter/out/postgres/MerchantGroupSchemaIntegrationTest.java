@@ -120,6 +120,38 @@ class MerchantGroupSchemaIntegrationTest {
     }
 
     @Test
+    void flywayCreatesRuleManifestTables() {
+        Integer tableCount = jdbcTemplate.queryForObject("""
+                select count(*)
+                from information_schema.tables
+                where table_schema = 'limit_management'
+                  and table_name in ('rule_manifests', 'rule_manifest_rules')
+                """, Integer.class);
+
+        assertThat(tableCount).isEqualTo(2);
+
+        List<String> manifestColumns = jdbcTemplate.queryForList("""
+                select column_name
+                from information_schema.columns
+                where table_schema = 'limit_management'
+                  and table_name = 'rule_manifests'
+                """, String.class);
+
+        assertThat(manifestColumns)
+                .contains("id", "version", "status", "checksum", "rule_count", "payload_json", "created_at");
+
+        List<String> ruleColumns = jdbcTemplate.queryForList("""
+                select column_name
+                from information_schema.columns
+                where table_schema = 'limit_management'
+                  and table_name = 'rule_manifest_rules'
+                """, String.class);
+
+        assertThat(ruleColumns)
+                .contains("manifest_id", "rule_id", "rule_code", "rule_version", "position", "payload_json");
+    }
+
+    @Test
     void databaseRejectsTwoActiveLimitRuleVersionsForSameCode() {
         jdbcTemplate.update("""
                 insert into limit_management.limit_rules
