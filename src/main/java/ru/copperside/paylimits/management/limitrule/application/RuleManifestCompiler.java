@@ -50,35 +50,36 @@ public class RuleManifestCompiler {
     }
 
     public RuleManifest compile() {
-        RuleDictionaries dictionaries = repository.getRuleDictionaries();
-        List<LimitRule> activeRules = repository.listActiveRulesForCompilation().stream()
-                .filter(LimitRule::active)
-                .sorted(Comparator.comparing(LimitRule::code)
-                        .thenComparingInt(LimitRule::version)
-                        .thenComparing(rule -> rule.id().toString()))
-                .toList();
+        return repository.saveCompiledManifest((version, activeRules, dictionaries) -> {
+            List<LimitRule> rules = activeRules.stream()
+                    .filter(LimitRule::active)
+                    .sorted(Comparator.comparing(LimitRule::code)
+                            .thenComparingInt(LimitRule::version)
+                            .thenComparing(rule -> rule.id().toString()))
+                    .toList();
 
-        List<ManifestDiagnostic> diagnostics = new ArrayList<>();
-        List<CompiledRule> compiledRules = activeRules.stream()
-                .map(this::compileRule)
-                .toList();
+            List<ManifestDiagnostic> diagnostics = new ArrayList<>();
+            List<CompiledRule> compiledRules = rules.stream()
+                    .map(this::compileRule)
+                    .toList();
 
-        DictionaryIndex dictionaryIndex = new DictionaryIndex(dictionaries);
-        validateRules(activeRules, compiledRules, dictionaryIndex, diagnostics);
-        if (diagnostics.isEmpty()) {
-            detectDuplicateRules(compiledRules, diagnostics);
-            detectOperationScopeOverlaps(compiledRules, dictionaryIndex.operationTypesByCode(), diagnostics);
-        }
+            DictionaryIndex dictionaryIndex = new DictionaryIndex(dictionaries);
+            validateRules(rules, compiledRules, dictionaryIndex, diagnostics);
+            if (diagnostics.isEmpty()) {
+                detectDuplicateRules(compiledRules, diagnostics);
+                detectOperationScopeOverlaps(compiledRules, dictionaryIndex.operationTypesByCode(), diagnostics);
+            }
 
-        if (!diagnostics.isEmpty()) {
-            throw new RuleManifestProblemException(
-                    "RULE_MANIFEST_CONFLICT",
-                    "Active rules cannot be compiled into a manifest",
-                    diagnostics
-            );
-        }
+            if (!diagnostics.isEmpty()) {
+                throw new RuleManifestProblemException(
+                        "RULE_MANIFEST_CONFLICT",
+                        "Active rules cannot be compiled into a manifest",
+                        diagnostics
+                );
+            }
 
-        return repository.saveNextManifest(version -> buildManifest(version, compiledRules));
+            return buildManifest(version, compiledRules);
+        });
     }
 
     public RuleManifest getLatest() {

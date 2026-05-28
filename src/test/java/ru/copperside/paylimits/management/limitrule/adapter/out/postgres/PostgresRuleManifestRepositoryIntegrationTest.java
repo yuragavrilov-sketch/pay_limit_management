@@ -10,6 +10,7 @@ import org.springframework.test.context.DynamicPropertySource;
 import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
+import ru.copperside.paylimits.management.limitrule.application.RuleManifestCanonicalJson;
 import ru.copperside.paylimits.management.limitrule.domain.AttributeSelectorType;
 import ru.copperside.paylimits.management.limitrule.domain.CompiledRule;
 import ru.copperside.paylimits.management.limitrule.domain.LimitRule;
@@ -29,6 +30,7 @@ import java.util.List;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 @SpringBootTest
 @Testcontainers
@@ -56,6 +58,8 @@ class PostgresRuleManifestRepositoryIntegrationTest {
     @Autowired
     private JdbcTemplate jdbcTemplate;
 
+    private final RuleManifestCanonicalJson canonicalJson = new RuleManifestCanonicalJson();
+
     @BeforeEach
     void cleanMutableTables() {
         jdbcTemplate.update("delete from limit_management.rule_manifest_rules");
@@ -82,8 +86,8 @@ class PostgresRuleManifestRepositoryIntegrationTest {
         LimitRule rule = rule("RULE_MANIFEST_VERSION", 1, RuleStatus.ACTIVE, now);
         ruleRepository.saveRule(rule);
 
-        RuleManifest saved = manifestRepository.saveNextManifest(version -> manifest(rule, version));
-        RuleManifest next = manifestRepository.saveNextManifest(version -> manifest(rule, version));
+        RuleManifest saved = manifestRepository.saveCompiledManifest((version, activeRules, dictionaries) -> manifest(rule, version));
+        RuleManifest next = manifestRepository.saveCompiledManifest((version, activeRules, dictionaries) -> manifest(rule, version));
 
         assertThat(saved.version()).isEqualTo(1);
         assertThat(manifestRepository.findManifest(saved.id())).contains(saved);
@@ -96,13 +100,48 @@ class PostgresRuleManifestRepositoryIntegrationTest {
         Instant now = Instant.parse("2026-05-28T09:00:00Z");
         LimitRule rule = rule("RULE_MANIFEST_PAYLOAD", 1, RuleStatus.ACTIVE, now);
         ruleRepository.saveRule(rule);
-        RuleManifest manifest = manifestRepository.saveNextManifest(version -> manifest(rule, version));
+        RuleManifest manifest = manifestRepository.saveCompiledManifest((version, activeRules, dictionaries) -> manifest(rule, version));
 
         RuleManifest found = manifestRepository.findManifest(manifest.id()).orElseThrow();
 
         assertThat(found.payload()).isEqualTo(manifest.payload());
         assertThat(found.ruleCount()).isEqualTo(manifest.payload().ruleCount());
         assertThat(found.rules()).isEqualTo(manifest.payload().rules());
+    }
+
+    @Test
+    void rejectsPayloadDriftBeforeInsert() {
+        Instant now = Instant.parse("2026-05-28T09:00:00Z");
+        LimitRule rule = rule("RULE_MANIFEST_DRIFT", 1, RuleStatus.ACTIVE, now);
+        ruleRepository.saveRule(rule);
+
+        assertThatThrownBy(() -> manifestRepository.saveCompiledManifest((version, activeRules, dictionaries) -> {
+            RuleManifest manifest = manifest(rule, version);
+            RuleManifestPayload payload = manifest.payload();
+            RuleManifestPayload driftedPayload = new RuleManifestPayload(
+                    payload.version() + 1,
+                    payload.status(),
+                    payload.ruleCount(),
+                    payload.createdAt(),
+                    payload.rules(),
+                    payload.diagnostics()
+            );
+            return new RuleManifest(
+                    manifest.id(),
+                    manifest.version(),
+                    manifest.status(),
+                    manifest.checksum(),
+                    manifest.ruleCount(),
+                    manifest.createdAt(),
+                    manifest.rules(),
+                    manifest.diagnostics(),
+                    driftedPayload
+            );
+        }))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("payload");
+
+        assertThat(manifestRepository.findLatestManifest()).isEmpty();
     }
 
     private RuleManifest manifest(LimitRule rule, int version) {
@@ -130,7 +169,7 @@ class PostgresRuleManifestRepositoryIntegrationTest {
                 UUID.randomUUID(),
                 version,
                 RuleManifestStatus.VALID,
-                "sha256:" + "a".repeat(64 - String.valueOf(version).length()) + version,
+                canonicalJson.checksum(payload),
                 1,
                 payload.createdAt(),
                 payload.rules(),

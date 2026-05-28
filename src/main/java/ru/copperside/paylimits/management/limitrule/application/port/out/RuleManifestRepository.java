@@ -7,7 +7,6 @@ import ru.copperside.paylimits.management.limitrule.domain.RuleManifest;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
-import java.util.function.Function;
 
 public interface RuleManifestRepository {
 
@@ -15,9 +14,15 @@ public interface RuleManifestRepository {
 
     RuleDictionaries getRuleDictionaries();
 
-    RuleManifest saveNextManifest(Function<Integer, RuleManifest> manifestFactory);
+    RuleManifest saveCompiledManifest(CompiledManifestFactory factory);
 
     Optional<RuleManifest> findLatestManifest();
 
     Optional<RuleManifest> findManifest(UUID id);
+
+    @FunctionalInterface
+    interface CompiledManifestFactory {
+
+        RuleManifest create(int version, List<LimitRule> activeRules, RuleDictionaries dictionaries);
+    }
 }

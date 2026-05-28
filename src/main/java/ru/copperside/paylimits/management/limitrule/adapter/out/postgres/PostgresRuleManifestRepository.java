@@ -29,14 +29,15 @@ import ru.copperside.paylimits.management.limitrule.domain.RulePeriod;
 import ru.copperside.paylimits.management.limitrule.domain.RuleSelector;
 import ru.copperside.paylimits.management.limitrule.domain.RuleStatus;
 
+import java.nio.charset.StandardCharsets;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Timestamp;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
-import java.util.function.Function;
 
 @Repository
 @ConditionalOnExpression("!'${spring.autoconfigure.exclude:}'.contains('DataSourceAutoConfiguration')")
@@ -87,26 +88,28 @@ public class PostgresRuleManifestRepository implements RuleManifestRepository {
 
     @Override
     @Transactional
-    public RuleManifest saveNextManifest(Function<Integer, RuleManifest> manifestFactory) {
+    public RuleManifest saveCompiledManifest(CompiledManifestFactory factory) {
         jdbcTemplate.execute("lock table limit_management.rule_manifests in exclusive mode");
         Integer maxVersion = jdbcTemplate.queryForObject("""
                 select coalesce(max(version), 0)
                 from limit_management.rule_manifests
                 """, Integer.class);
         int nextVersion = (maxVersion == null ? 0 : maxVersion) + 1;
-        RuleManifest manifest = manifestFactory.apply(nextVersion);
-        String payloadJson = new String(canonicalJson.bytes(manifest.payload()));
+        RuleManifest manifest = factory.create(nextVersion, listActiveRulesForCompilation(), getRuleDictionaries());
+        validateManifest(manifest);
+        RuleManifestPayload payload = manifest.payload();
+        String payloadJson = new String(canonicalJson.bytes(payload), StandardCharsets.UTF_8);
 
         jdbcTemplate.update("""
                 insert into limit_management.rule_manifests
                     (id, version, status, checksum, rule_count, payload_json, created_at)
                 values (?, ?, ?, ?, ?, ?::jsonb, ?)
                 """,
-                manifest.id(), manifest.version(), manifest.status().name(), manifest.checksum(),
-                manifest.ruleCount(), payloadJson, Timestamp.from(manifest.createdAt()));
+                manifest.id(), payload.version(), payload.status().name(), manifest.checksum(),
+                payload.ruleCount(), payloadJson, Timestamp.from(payload.createdAt()));
 
-        for (int position = 0; position < manifest.rules().size(); position++) {
-            CompiledRule rule = manifest.rules().get(position);
+        for (int position = 0; position < payload.rules().size(); position++) {
+            CompiledRule rule = payload.rules().get(position);
             jdbcTemplate.update("""
                     insert into limit_management.rule_manifest_rules
                         (manifest_id, rule_id, rule_code, rule_version, position, payload_json)
@@ -115,6 +118,25 @@ public class PostgresRuleManifestRepository implements RuleManifestRepository {
                     manifest.id(), rule.ruleId(), rule.code(), rule.version(), position, writeJson(rule));
         }
         return manifest;
+    }
+
+    private void validateManifest(RuleManifest manifest) {
+        if (manifest == null || manifest.payload() == null) {
+            throw new IllegalArgumentException("Rule manifest payload must be present");
+        }
+        RuleManifestPayload payload = manifest.payload();
+        if (manifest.version() != payload.version()
+                || manifest.status() != payload.status()
+                || manifest.ruleCount() != payload.ruleCount()
+                || !Objects.equals(manifest.createdAt(), payload.createdAt())
+                || !Objects.equals(manifest.rules(), payload.rules())
+                || !Objects.equals(manifest.diagnostics(), payload.diagnostics())) {
+            throw new IllegalArgumentException("Rule manifest payload does not match top-level fields");
+        }
+        String expectedChecksum = canonicalJson.checksum(payload);
+        if (!Objects.equals(manifest.checksum(), expectedChecksum)) {
+            throw new IllegalArgumentException("Rule manifest checksum does not match payload");
+        }
     }
 
     @Override

@@ -29,7 +29,6 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
-import java.util.function.Function;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -75,6 +74,18 @@ class RuleManifestCompilerTest {
     }
 
     @Test
+    void compilesUsingRepositoryOwnedSnapshot() {
+        LimitRule rule = repository.addActiveRule("RULE_A", typeSelector("SBP_C2B"), OperationDirection.IN, noneSelector());
+        repository.failDirectSnapshotReads = true;
+
+        RuleManifest manifest = compiler.compile();
+
+        assertThat(manifest.rules()).extracting(CompiledRule::ruleId).containsExactly(rule.id());
+        assertThat(repository.snapshotCallbackUsed).isTrue();
+        assertThat(repository.saved).containsExactly(manifest);
+    }
+
+    @Test
     void keepsChecksumStableForSameVersionClockAndRules() {
         repository.addActiveRule("RULE_A", typeSelector("SBP_C2B"), OperationDirection.IN, noneSelector());
 
@@ -103,6 +114,7 @@ class RuleManifestCompilerTest {
                 });
 
         assertThat(repository.saved).isEmpty();
+        assertThat(repository.snapshotCallbackUsed).isTrue();
     }
 
     @Test
@@ -229,6 +241,8 @@ class RuleManifestCompilerTest {
         final List<RuleManifest> saved = new ArrayList<>();
         int nextVersion = 1;
         boolean paymentSystemsEnabled = true;
+        boolean failDirectSnapshotReads;
+        boolean snapshotCallbackUsed;
 
         LimitRule addActiveRule(
                 String code,
@@ -260,11 +274,17 @@ class RuleManifestCompilerTest {
 
         @Override
         public List<LimitRule> listActiveRulesForCompilation() {
+            if (failDirectSnapshotReads) {
+                throw new IllegalStateException("Compiler must use repository-owned snapshot");
+            }
             return List.copyOf(activeRules);
         }
 
         @Override
         public RuleDictionaries getRuleDictionaries() {
+            if (failDirectSnapshotReads) {
+                throw new IllegalStateException("Compiler must use repository-owned snapshot");
+            }
             return new RuleDictionaries(
                     List.of(item("SBP", true), item("CARD", true)),
                     List.of(
@@ -289,8 +309,9 @@ class RuleManifestCompilerTest {
         }
 
         @Override
-        public RuleManifest saveNextManifest(Function<Integer, RuleManifest> manifestFactory) {
-            RuleManifest manifest = manifestFactory.apply(nextVersion++);
+        public RuleManifest saveCompiledManifest(CompiledManifestFactory factory) {
+            snapshotCallbackUsed = true;
+            RuleManifest manifest = factory.create(nextVersion++, List.copyOf(activeRules), getRuleDictionariesForSnapshot());
             saved.add(manifest);
             return manifest;
         }
@@ -311,6 +332,16 @@ class RuleManifestCompilerTest {
 
         private static OperationType operationType(String code, String familyCode, OperationDirection direction, boolean enabled) {
             return new OperationType(UUID.randomUUID(), code, code, familyCode, direction, enabled, 10, Instant.EPOCH, Instant.EPOCH);
+        }
+
+        private RuleDictionaries getRuleDictionariesForSnapshot() {
+            boolean previous = failDirectSnapshotReads;
+            failDirectSnapshotReads = false;
+            try {
+                return getRuleDictionaries();
+            } finally {
+                failDirectSnapshotReads = previous;
+            }
         }
     }
 }
