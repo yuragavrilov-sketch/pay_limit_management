@@ -33,6 +33,7 @@ PAY_ALL Config Server + Vault configuration model.
 | `PAY_LIMIT_MANAGEMENT_DB_USERNAME` | `pay_admin` | Local fallback DB user |
 | `PAY_LIMIT_MANAGEMENT_DB_PASSWORD` | empty | Local fallback DB password; test/profile runs load it from Vault |
 | `PAY_LIMIT_MANAGEMENT_SERVICE_NAME` | `Limit Management` | Display name for this service |
+| `PAY_LIMIT_MANAGEMENT_RUNTIME_MANIFEST_MIN_ACTIVATION_LEAD_TIME` | `5m` | Minimum accepted delay between runtime manifest creation and `effectiveFrom` |
 
 ## Run
 
@@ -57,12 +58,43 @@ Read endpoints:
 - `GET /internal/v1/limit-management/rule-manifests/latest`
 - `GET /internal/v1/limit-management/rule-manifests/{manifestId}`
 
+## Runtime manifests
+
+Runtime manifests are immutable engine-facing snapshots with mandatory
+`effectiveFrom`. They include active rules, enabled assignments, and merchant
+group memberships, and the checksum covers the canonical payload including
+`effectiveFrom`.
+
+Endpoints:
+
+- `POST /internal/v1/limit-management/runtime-manifests`
+- `GET /internal/v1/limit-management/runtime-manifests/effective?at={instant}`
+- `GET /internal/v1/limit-management/runtime-manifests/scheduled?after={instant}&limit={n}`
+- `GET /internal/v1/limit-management/runtime-manifests/{manifestId}`
+
+Compilation rejects requests where `effectiveFrom` is earlier than
+`now + pay-limit-management.runtime-manifest.min-activation-lead-time`.
+
 Full test-profile startup is owned by `../infra/run-test.ps1`: non-secret
 database config is loaded from Config Server branch `test`, and
 `spring.datasource.password` is loaded from Vault path
 `pay/test/pay-limit-management-db-password`.
 
 Health: [http://localhost:8084/actuator/health](http://localhost:8084/actuator/health)
+
+## Limit assignments
+
+Assignments bind an `ACTIVE` rule to either a merchant group or a merchant:
+
+- `GET /internal/v1/limit-management/assignments`
+- `POST /internal/v1/limit-management/assignments`
+- `PATCH /internal/v1/limit-management/assignments/{assignmentId}`
+- `POST /internal/v1/limit-management/assignments/{assignmentId}/disable`
+
+`ruleId`, `ownerType`, and `ownerId` are immutable after creation. Enabled
+assignments for the same rule and owner must not overlap by
+`validFrom`/`validTo`. `LIMITED` assignments require `limitValue`;
+`UNLIMITED` and `BLOCKED` assignments keep `limitValue` null.
 
 ### Docker Compose contour
 

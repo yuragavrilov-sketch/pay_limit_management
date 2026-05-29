@@ -51,3 +51,5 @@ springdoc:
 
 pay-limit-management:
   service-name: ${PAY_LIMIT_MANAGEMENT_SERVICE_NAME:Limit Management}
+  runtime-manifest:
+    min-activation-lead-time: ${PAY_LIMIT_MANAGEMENT_RUNTIME_MANIFEST_MIN_ACTIVATION_LEAD_TIME:5m}

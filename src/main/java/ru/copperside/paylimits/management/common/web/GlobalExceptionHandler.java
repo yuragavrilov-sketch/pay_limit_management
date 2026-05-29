@@ -7,9 +7,11 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import ru.copperside.paylimits.management.limitassignment.domain.LimitAssignmentProblemException;
 import ru.copperside.paylimits.management.limitrule.domain.LimitRuleProblemException;
 import ru.copperside.paylimits.management.limitrule.domain.RuleManifestProblemException;
 import ru.copperside.paylimits.management.merchantgroup.domain.MerchantGroupProblemException;
+import ru.copperside.paylimits.management.runtimeconfig.domain.RuntimeManifestProblemException;
 
 import java.time.Clock;
 import java.util.UUID;
@@ -55,6 +57,16 @@ public class GlobalExceptionHandler {
         return problem(status, ex.code(), "Limit rule problem", ex.getMessage());
     }
 
+    @ExceptionHandler(LimitAssignmentProblemException.class)
+    ResponseEntity<ProblemEnvelope> handleLimitAssignmentProblem(LimitAssignmentProblemException ex) {
+        HttpStatus status = switch (ex.code()) {
+            case "ASSIGNMENT_NOT_FOUND", "RULE_NOT_FOUND", "GROUP_NOT_FOUND" -> HttpStatus.NOT_FOUND;
+            case "VALIDATION_ERROR" -> HttpStatus.BAD_REQUEST;
+            default -> HttpStatus.CONFLICT;
+        };
+        return problem(status, ex.code(), titleForAssignmentProblem(ex.code()), messageWithoutCode(ex), ex.details());
+    }
+
     @ExceptionHandler(RuleManifestProblemException.class)
     ResponseEntity<ProblemEnvelope> handleRuleManifestProblem(RuleManifestProblemException ex) {
         HttpStatus status = switch (ex.code()) {
@@ -63,6 +75,16 @@ public class GlobalExceptionHandler {
             default -> HttpStatus.CONFLICT;
         };
         return problem(status, ex.code(), titleForManifestProblem(ex.code()), messageWithoutCode(ex), ex.details());
+    }
+
+    @ExceptionHandler(RuntimeManifestProblemException.class)
+    ResponseEntity<ProblemEnvelope> handleRuntimeManifestProblem(RuntimeManifestProblemException ex) {
+        HttpStatus status = switch (ex.code()) {
+            case "RUNTIME_MANIFEST_NOT_FOUND" -> HttpStatus.NOT_FOUND;
+            case "VALIDATION_ERROR" -> HttpStatus.BAD_REQUEST;
+            default -> HttpStatus.CONFLICT;
+        };
+        return problem(status, ex.code(), titleForRuntimeManifestProblem(ex.code()), messageWithoutCode(ex), ex.details());
     }
 
     private ResponseEntity<ProblemEnvelope> problem(HttpStatus status, String code, String title, String message) {
@@ -90,11 +112,28 @@ public class GlobalExceptionHandler {
                 .body(ProblemEnvelope.of(detail, clock));
     }
 
+    private String titleForAssignmentProblem(String code) {
+        return switch (code) {
+            case "ASSIGNMENT_CONFLICT" -> "Assignment conflict";
+            case "ASSIGNMENT_NOT_FOUND" -> "Assignment not found";
+            default -> "Limit assignment problem";
+        };
+    }
+
     private String titleForManifestProblem(String code) {
         return switch (code) {
             case "RULE_MANIFEST_CONFLICT" -> "Rule manifest conflict";
             case "RULE_MANIFEST_NOT_FOUND" -> "Rule manifest not found";
             default -> "Rule manifest problem";
+        };
+    }
+
+    private String titleForRuntimeManifestProblem(String code) {
+        return switch (code) {
+            case "RUNTIME_MANIFEST_CONFLICT" -> "Runtime manifest conflict";
+            case "RUNTIME_MANIFEST_LEAD_TIME_VIOLATION" -> "Runtime manifest lead time violation";
+            case "RUNTIME_MANIFEST_NOT_FOUND" -> "Runtime manifest not found";
+            default -> "Runtime manifest problem";
         };
     }
 

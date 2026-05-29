@@ -152,6 +152,78 @@ class MerchantGroupSchemaIntegrationTest {
     }
 
     @Test
+    void flywayCreatesLimitAssignmentTable() {
+        Integer tableCount = jdbcTemplate.queryForObject("""
+                select count(*)
+                from information_schema.tables
+                where table_schema = 'limit_management'
+                  and table_name = 'limit_assignments'
+                """, Integer.class);
+
+        assertThat(tableCount).isEqualTo(1);
+
+        List<String> columns = jdbcTemplate.queryForList("""
+                select column_name
+                from information_schema.columns
+                where table_schema = 'limit_management'
+                  and table_name = 'limit_assignments'
+                """, String.class);
+
+        assertThat(columns)
+                .contains(
+                        "id",
+                        "rule_id",
+                        "owner_type",
+                        "owner_id",
+                        "limit_mode",
+                        "limit_value",
+                        "valid_from",
+                        "valid_to",
+                        "enabled",
+                        "created_at",
+                        "updated_at"
+                );
+    }
+
+    @Test
+    void flywayCreatesRuntimeManifestTables() {
+        Integer tableCount = jdbcTemplate.queryForObject("""
+                select count(*)
+                from information_schema.tables
+                where table_schema = 'limit_management'
+                  and table_name in (
+                    'runtime_manifests',
+                    'runtime_manifest_rules',
+                    'runtime_manifest_assignments',
+                    'runtime_manifest_memberships'
+                  )
+                """, Integer.class);
+
+        assertThat(tableCount).isEqualTo(4);
+
+        List<String> manifestColumns = jdbcTemplate.queryForList("""
+                select column_name
+                from information_schema.columns
+                where table_schema = 'limit_management'
+                  and table_name = 'runtime_manifests'
+                """, String.class);
+
+        assertThat(manifestColumns)
+                .contains(
+                        "id",
+                        "version",
+                        "status",
+                        "checksum",
+                        "created_at",
+                        "effective_from",
+                        "rule_count",
+                        "assignment_count",
+                        "membership_count",
+                        "payload_json"
+                );
+    }
+
+    @Test
     void databaseRejectsTwoActiveLimitRuleVersionsForSameCode() {
         jdbcTemplate.update("""
                 insert into limit_management.limit_rules
