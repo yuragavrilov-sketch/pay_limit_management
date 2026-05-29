@@ -12,7 +12,6 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 import ru.copperside.paylimits.management.limitassignment.domain.AssignmentOwnerType;
 import ru.copperside.paylimits.management.limitassignment.domain.LimitMode;
 import ru.copperside.paylimits.management.limitrule.domain.AttributeSelectorType;
-import ru.copperside.paylimits.management.limitrule.domain.CompiledRule;
 import ru.copperside.paylimits.management.limitrule.domain.LimitTargetType;
 import ru.copperside.paylimits.management.limitrule.domain.ManifestDiagnostic;
 import ru.copperside.paylimits.management.limitrule.domain.OperationDirection;
@@ -22,6 +21,7 @@ import ru.copperside.paylimits.management.limitrule.domain.RulePeriod;
 import ru.copperside.paylimits.management.limitrule.domain.RuleSelector;
 import ru.copperside.paylimits.management.runtimeconfig.application.RuntimeManifestCanonicalJson;
 import ru.copperside.paylimits.management.runtimeconfig.domain.RuntimeCompiledAssignment;
+import ru.copperside.paylimits.management.runtimeconfig.domain.RuntimeCompiledRule;
 import ru.copperside.paylimits.management.runtimeconfig.domain.RuntimeManifest;
 import ru.copperside.paylimits.management.runtimeconfig.domain.RuntimeManifestDescriptor;
 import ru.copperside.paylimits.management.runtimeconfig.domain.RuntimeManifestPayload;
@@ -138,7 +138,7 @@ class PostgresRuntimeManifestRepositoryIntegrationTest {
     }
 
     private RuntimeManifest manifest(int version, SnapshotIds ids, Instant createdAt, Instant effectiveFrom) {
-        List<CompiledRule> rules = List.of(compiledRule(ids.ruleId(), ids.ruleCode()));
+        List<RuntimeCompiledRule> rules = List.of(compiledRule(ids.ruleId(), ids.ruleCode()));
         List<RuntimeCompiledAssignment> assignments = List.of(new RuntimeCompiledAssignment(
                 ids.assignmentId(),
                 ids.ruleId(),
@@ -189,18 +189,20 @@ class PostgresRuntimeManifestRepositoryIntegrationTest {
         );
     }
 
-    private CompiledRule compiledRule(UUID ruleId, String ruleCode) {
-        return new CompiledRule(
+    private RuntimeCompiledRule compiledRule(UUID ruleId, String ruleCode) {
+        return new RuntimeCompiledRule(
                 ruleId,
                 ruleCode,
                 1,
-                new CompiledRule.Matcher(
+                new RuntimeCompiledRule.Matcher(
                         new RuleSelector<>(OperationSelectorType.TYPE, "SBP_C2B"),
+                        false,
+                        List.of("SBP_C2B"),
                         OperationDirection.IN,
                         new RuleSelector<>(AttributeSelectorType.NONE, null),
                         LimitTargetType.PHONE
                 ),
-                new CompiledRule.Measure(RuleMetric.AMOUNT, RulePeriod.DAY, "RUB")
+                new RuntimeCompiledRule.Measure(RuleMetric.AMOUNT, RulePeriod.DAY, "RUB")
         );
     }
 

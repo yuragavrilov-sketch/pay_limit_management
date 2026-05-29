@@ -19,6 +19,7 @@ import ru.copperside.paylimits.management.limitrule.domain.LimitRule;
 import ru.copperside.paylimits.management.limitrule.domain.LimitTargetType;
 import ru.copperside.paylimits.management.limitrule.domain.OperationDirection;
 import ru.copperside.paylimits.management.limitrule.domain.OperationSelectorType;
+import ru.copperside.paylimits.management.limitrule.domain.OperationType;
 import ru.copperside.paylimits.management.limitrule.domain.RuleMetric;
 import ru.copperside.paylimits.management.limitrule.domain.RulePeriod;
 import ru.copperside.paylimits.management.limitrule.domain.RuleSelector;
@@ -68,6 +69,15 @@ public class PostgresRuntimeManifestRepository implements RuntimeManifestReposit
                 where r.status = 'ACTIVE'
                 order by r.code asc, r.version asc, r.id asc
                 """, (rs, rowNum) -> mapRule(rs));
+    }
+
+    @Override
+    public List<OperationType> listOperationTypesForCompilation() {
+        return jdbcTemplate.query("""
+                select id, code, name, family_code, direction, enabled, sort_order, created_at, updated_at
+                from limit_management.operation_types
+                order by sort_order asc, code asc
+                """, (rs, rowNum) -> mapOperationType(rs));
     }
 
     @Override
@@ -300,6 +310,20 @@ public class PostgresRuntimeManifestRepository implements RuntimeManifestReposit
                 rs.getTimestamp("updated_at").toInstant(),
                 activatedAt == null ? null : activatedAt.toInstant(),
                 disabledAt == null ? null : disabledAt.toInstant()
+        );
+    }
+
+    private OperationType mapOperationType(ResultSet rs) throws SQLException {
+        return new OperationType(
+                rs.getObject("id", UUID.class),
+                rs.getString("code"),
+                rs.getString("name"),
+                rs.getString("family_code"),
+                OperationDirection.valueOf(rs.getString("direction")),
+                rs.getBoolean("enabled"),
+                rs.getInt("sort_order"),
+                rs.getTimestamp("created_at").toInstant(),
+                rs.getTimestamp("updated_at").toInstant()
         );
     }
 

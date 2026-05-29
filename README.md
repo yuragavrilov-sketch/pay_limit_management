@@ -63,7 +63,10 @@ Read endpoints:
 Runtime manifests are immutable engine-facing snapshots with mandatory
 `effectiveFrom`. They include active rules, enabled assignments, and merchant
 group memberships, and the checksum covers the canonical payload including
-`effectiveFrom`.
+`effectiveFrom`. Runtime rule matchers also include engine-ready operation
+matching fields: `ANY` selectors set `operationMatchesAll=true`, `TYPE`
+selectors publish the selected operation type code, and `FAMILY` selectors are
+expanded to concrete enabled operation type codes before publishing.
 
 Endpoints:
 

@@ -5,17 +5,18 @@ import org.junit.jupiter.api.Test;
 import ru.copperside.paylimits.management.limitassignment.domain.AssignmentOwnerType;
 import ru.copperside.paylimits.management.limitassignment.domain.LimitMode;
 import ru.copperside.paylimits.management.limitrule.domain.AttributeSelectorType;
-import ru.copperside.paylimits.management.limitrule.domain.CompiledRule;
 import ru.copperside.paylimits.management.limitrule.domain.LimitRule;
 import ru.copperside.paylimits.management.limitrule.domain.LimitTargetType;
 import ru.copperside.paylimits.management.limitrule.domain.OperationDirection;
 import ru.copperside.paylimits.management.limitrule.domain.OperationSelectorType;
+import ru.copperside.paylimits.management.limitrule.domain.OperationType;
 import ru.copperside.paylimits.management.limitrule.domain.RuleMetric;
 import ru.copperside.paylimits.management.limitrule.domain.RulePeriod;
 import ru.copperside.paylimits.management.limitrule.domain.RuleSelector;
 import ru.copperside.paylimits.management.limitrule.domain.RuleStatus;
 import ru.copperside.paylimits.management.runtimeconfig.application.port.out.RuntimeManifestRepository;
 import ru.copperside.paylimits.management.runtimeconfig.domain.RuntimeCompiledAssignment;
+import ru.copperside.paylimits.management.runtimeconfig.domain.RuntimeCompiledRule;
 import ru.copperside.paylimits.management.runtimeconfig.domain.RuntimeManifest;
 import ru.copperside.paylimits.management.runtimeconfig.domain.RuntimeManifestPayload;
 import ru.copperside.paylimits.management.runtimeconfig.domain.RuntimeManifestProblemException;
@@ -66,10 +67,28 @@ class RuntimeManifestCompilerTest {
         assertThat(manifest.ruleCount()).isEqualTo(1);
         assertThat(manifest.assignmentCount()).isEqualTo(1);
         assertThat(manifest.membershipCount()).isEqualTo(1);
-        assertThat(manifest.rules()).extracting(CompiledRule::ruleId).containsExactly(rule.id());
+        assertThat(manifest.rules()).extracting(RuntimeCompiledRule::ruleId).containsExactly(rule.id());
         assertThat(manifest.assignments()).containsExactly(assignment);
         assertThat(manifest.memberships()).containsExactly(membership);
         assertThat(repository.manifests).containsExactly(manifest);
+    }
+
+    @Test
+    void expandsFamilyOperationSelectorForRuntimeRules() {
+        repository.addOperationType("SBP_B2C", "SBP", OperationDirection.OUT, true, 20);
+        repository.addOperationType("SBP_C2B", "SBP", OperationDirection.IN, true, 10);
+        repository.addOperationType("SBP_DISABLED", "SBP", OperationDirection.IN, false, 5);
+        repository.addOperationType("ECOM", "CARD", OperationDirection.IN, true, 30);
+        repository.addActiveRule(
+                "RULE_SBP_PHONE_DAY",
+                new RuleSelector<>(OperationSelectorType.FAMILY, "SBP"));
+
+        RuntimeManifest manifest = compiler.compile(Instant.parse("2026-05-29T10:15:00Z"));
+
+        assertThat(manifest.rules()).hasSize(1);
+        assertThat(manifest.rules().getFirst().matcher().operationMatchesAll()).isFalse();
+        assertThat(manifest.rules().getFirst().matcher().operationTypeCodes())
+                .containsExactly("SBP_C2B", "SBP_B2C");
     }
 
     @Test
@@ -86,7 +105,7 @@ class RuntimeManifestCompilerTest {
     @Test
     void checksumChangesWhenOnlyEffectiveFromChanges() {
         LimitRule rule = repository.addActiveRule("RULE_SBP_PHONE_DAY");
-        CompiledRule compiledRule = RuntimeManifestCompiler.compileRule(rule);
+        RuntimeCompiledRule compiledRule = RuntimeManifestCompiler.compileRule(rule, repository.operationTypes);
         RuntimeManifestCanonicalJson canonicalJson = new RuntimeManifestCanonicalJson();
 
         RuntimeManifestPayload first = payload(1, NOW, Instant.parse("2026-05-29T10:15:00Z"), List.of(compiledRule));
@@ -106,12 +125,12 @@ class RuntimeManifestCompilerTest {
 
         RuntimeManifest manifest = compiler.compile(Instant.parse("2026-05-29T10:15:00Z"));
 
-        assertThat(manifest.rules()).extracting(CompiledRule::code).containsExactly("RULE_A", "RULE_Z");
+        assertThat(manifest.rules()).extracting(RuntimeCompiledRule::code).containsExactly("RULE_A", "RULE_Z");
         assertThat(manifest.assignments()).extracting(RuntimeCompiledAssignment::ruleCode).containsExactly("RULE_A", "RULE_Z");
         assertThat(manifest.memberships()).extracting(RuntimeMerchantGroupMembership::merchantId).containsExactly("502118", "502119");
     }
 
-    private RuntimeManifestPayload payload(int version, Instant createdAt, Instant effectiveFrom, List<CompiledRule> rules) {
+    private RuntimeManifestPayload payload(int version, Instant createdAt, Instant effectiveFrom, List<RuntimeCompiledRule> rules) {
         return new RuntimeManifestPayload(
                 version,
                 RuntimeManifestStatus.VALID,
@@ -130,17 +149,22 @@ class RuntimeManifestCompilerTest {
     static class FakeRepository implements RuntimeManifestRepository {
 
         final List<LimitRule> rules = new ArrayList<>();
+        final List<OperationType> operationTypes = new ArrayList<>();
         final List<RuntimeCompiledAssignment> assignments = new ArrayList<>();
         final List<RuntimeMerchantGroupMembership> memberships = new ArrayList<>();
         final List<RuntimeManifest> manifests = new ArrayList<>();
 
         LimitRule addActiveRule(String code) {
+            return addActiveRule(code, new RuleSelector<>(OperationSelectorType.TYPE, "SBP_C2B"));
+        }
+
+        LimitRule addActiveRule(String code, RuleSelector<OperationSelectorType> operationSelector) {
             LimitRule rule = new LimitRule(
                     UUID.randomUUID(),
                     code,
                     1,
                     code,
-                    new RuleSelector<>(OperationSelectorType.TYPE, "SBP_C2B"),
+                    operationSelector,
                     OperationDirection.IN,
                     new RuleSelector<>(AttributeSelectorType.NONE, null),
                     LimitTargetType.PHONE,
@@ -155,6 +179,28 @@ class RuntimeManifestCompilerTest {
             );
             rules.add(rule);
             return rule;
+        }
+
+        OperationType addOperationType(
+                String code,
+                String familyCode,
+                OperationDirection direction,
+                boolean enabled,
+                int sortOrder
+        ) {
+            OperationType operationType = new OperationType(
+                    UUID.randomUUID(),
+                    code,
+                    code,
+                    familyCode,
+                    direction,
+                    enabled,
+                    sortOrder,
+                    Instant.EPOCH,
+                    Instant.EPOCH
+            );
+            operationTypes.add(operationType);
+            return operationType;
         }
 
         RuntimeCompiledAssignment addAssignment(
@@ -198,6 +244,11 @@ class RuntimeManifestCompilerTest {
             return rules.stream()
                     .sorted(Comparator.comparing(LimitRule::code))
                     .toList();
+        }
+
+        @Override
+        public List<OperationType> listOperationTypesForCompilation() {
+            return List.copyOf(operationTypes);
         }
 
         @Override

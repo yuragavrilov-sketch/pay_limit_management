@@ -1,8 +1,8 @@
 package ru.copperside.paylimits.management.runtimeconfig.adapter.in.web;
 
-import ru.copperside.paylimits.management.limitrule.domain.CompiledRule;
 import ru.copperside.paylimits.management.limitrule.domain.ManifestDiagnostic;
 import ru.copperside.paylimits.management.runtimeconfig.domain.RuntimeCompiledAssignment;
+import ru.copperside.paylimits.management.runtimeconfig.domain.RuntimeCompiledRule;
 import ru.copperside.paylimits.management.runtimeconfig.domain.RuntimeManifest;
 import ru.copperside.paylimits.management.runtimeconfig.domain.RuntimeManifestStatus;
 import ru.copperside.paylimits.management.runtimeconfig.domain.RuntimeMerchantGroupMembership;
@@ -21,7 +21,7 @@ public record RuntimeManifestResponse(
         int ruleCount,
         int assignmentCount,
         int membershipCount,
-        List<CompiledRule> rules,
+        List<RuntimeCompiledRule> rules,
         List<RuntimeCompiledAssignment> assignments,
         List<RuntimeMerchantGroupMembership> memberships,
         List<ManifestDiagnostic> diagnostics

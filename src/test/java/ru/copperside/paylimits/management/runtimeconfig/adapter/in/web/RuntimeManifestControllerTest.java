@@ -15,12 +15,12 @@ import org.springframework.test.web.servlet.MockMvc;
 import ru.copperside.paylimits.management.limitassignment.domain.AssignmentOwnerType;
 import ru.copperside.paylimits.management.limitassignment.domain.LimitMode;
 import ru.copperside.paylimits.management.limitrule.domain.AttributeSelectorType;
-import ru.copperside.paylimits.management.limitrule.domain.CompiledRule;
 import ru.copperside.paylimits.management.limitrule.domain.LimitRule;
 import ru.copperside.paylimits.management.limitrule.domain.LimitTargetType;
 import ru.copperside.paylimits.management.limitrule.domain.ManifestDiagnostic;
 import ru.copperside.paylimits.management.limitrule.domain.OperationDirection;
 import ru.copperside.paylimits.management.limitrule.domain.OperationSelectorType;
+import ru.copperside.paylimits.management.limitrule.domain.OperationType;
 import ru.copperside.paylimits.management.limitrule.domain.RuleMetric;
 import ru.copperside.paylimits.management.limitrule.domain.RulePeriod;
 import ru.copperside.paylimits.management.limitrule.domain.RuleSelector;
@@ -29,6 +29,7 @@ import ru.copperside.paylimits.management.runtimeconfig.application.RuntimeManif
 import ru.copperside.paylimits.management.runtimeconfig.application.RuntimeManifestCompiler;
 import ru.copperside.paylimits.management.runtimeconfig.application.port.out.RuntimeManifestRepository;
 import ru.copperside.paylimits.management.runtimeconfig.domain.RuntimeCompiledAssignment;
+import ru.copperside.paylimits.management.runtimeconfig.domain.RuntimeCompiledRule;
 import ru.copperside.paylimits.management.runtimeconfig.domain.RuntimeManifest;
 import ru.copperside.paylimits.management.runtimeconfig.domain.RuntimeManifestDescriptor;
 import ru.copperside.paylimits.management.runtimeconfig.domain.RuntimeManifestPayload;
@@ -186,12 +187,14 @@ class RuntimeManifestControllerTest {
 
         private final RuntimeManifestCanonicalJson canonicalJson = new RuntimeManifestCanonicalJson();
         final List<LimitRule> rules = new ArrayList<>();
+        final List<OperationType> operationTypes = new ArrayList<>();
         final List<RuntimeCompiledAssignment> assignments = new ArrayList<>();
         final List<RuntimeMerchantGroupMembership> memberships = new ArrayList<>();
         final List<RuntimeManifest> manifests = new ArrayList<>();
 
         FakeRepository clear() {
             rules.clear();
+            operationTypes.clear();
             assignments.clear();
             memberships.clear();
             manifests.clear();
@@ -251,9 +254,9 @@ class RuntimeManifestControllerTest {
         }
 
         RuntimeManifest sampleManifest(int version, Instant effectiveFrom) {
-            List<CompiledRule> compiledRules = rules.stream()
+            List<RuntimeCompiledRule> compiledRules = rules.stream()
                     .sorted(Comparator.comparing(LimitRule::code))
-                    .map(RuntimeManifestCompiler::compileRule)
+                    .map(rule -> RuntimeManifestCompiler.compileRule(rule, operationTypes))
                     .toList();
             RuntimeManifestPayload payload = new RuntimeManifestPayload(
                     version,
@@ -289,6 +292,11 @@ class RuntimeManifestControllerTest {
         @Override
         public List<LimitRule> listActiveRulesForCompilation() {
             return List.copyOf(rules);
+        }
+
+        @Override
+        public List<OperationType> listOperationTypesForCompilation() {
+            return List.copyOf(operationTypes);
         }
 
         @Override

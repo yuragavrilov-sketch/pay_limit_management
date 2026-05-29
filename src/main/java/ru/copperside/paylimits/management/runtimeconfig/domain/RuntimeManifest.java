@@ -1,6 +1,5 @@
 package ru.copperside.paylimits.management.runtimeconfig.domain;
 
-import ru.copperside.paylimits.management.limitrule.domain.CompiledRule;
 import ru.copperside.paylimits.management.limitrule.domain.ManifestDiagnostic;
 
 import java.time.Instant;
@@ -17,7 +16,7 @@ public record RuntimeManifest(
         int ruleCount,
         int assignmentCount,
         int membershipCount,
-        List<CompiledRule> rules,
+        List<RuntimeCompiledRule> rules,
         List<RuntimeCompiledAssignment> assignments,
         List<RuntimeMerchantGroupMembership> memberships,
         List<ManifestDiagnostic> diagnostics,

@@ -1,10 +1,13 @@
 package ru.copperside.paylimits.management.runtimeconfig.application;
 
-import ru.copperside.paylimits.management.limitrule.domain.CompiledRule;
 import ru.copperside.paylimits.management.limitrule.domain.LimitRule;
 import ru.copperside.paylimits.management.limitrule.domain.ManifestDiagnostic;
+import ru.copperside.paylimits.management.limitrule.domain.OperationSelectorType;
+import ru.copperside.paylimits.management.limitrule.domain.OperationType;
+import ru.copperside.paylimits.management.limitrule.domain.RuleSelector;
 import ru.copperside.paylimits.management.runtimeconfig.application.port.out.RuntimeManifestRepository;
 import ru.copperside.paylimits.management.runtimeconfig.domain.RuntimeCompiledAssignment;
+import ru.copperside.paylimits.management.runtimeconfig.domain.RuntimeCompiledRule;
 import ru.copperside.paylimits.management.runtimeconfig.domain.RuntimeManifest;
 import ru.copperside.paylimits.management.runtimeconfig.domain.RuntimeManifestDescriptor;
 import ru.copperside.paylimits.management.runtimeconfig.domain.RuntimeManifestPayload;
@@ -77,18 +80,20 @@ public class RuntimeManifestCompiler {
         return repository.listScheduledManifests(after, limit);
     }
 
-    public static CompiledRule compileRule(LimitRule rule) {
-        return new CompiledRule(
+    public static RuntimeCompiledRule compileRule(LimitRule rule, List<OperationType> operationTypes) {
+        return new RuntimeCompiledRule(
                 rule.id(),
                 rule.code(),
                 rule.version(),
-                new CompiledRule.Matcher(
+                new RuntimeCompiledRule.Matcher(
                         rule.operationSelector(),
+                        rule.operationSelector().type() == OperationSelectorType.ANY,
+                        operationTypeCodes(rule.operationSelector(), operationTypes),
                         rule.direction(),
                         rule.attributeSelector(),
                         rule.targetType()
                 ),
-                new CompiledRule.Measure(
+                new RuntimeCompiledRule.Measure(
                         rule.metric(),
                         rule.period(),
                         rule.currency()
@@ -97,12 +102,13 @@ public class RuntimeManifestCompiler {
     }
 
     private RuntimeManifest buildManifest(int version, Instant createdAt, Instant effectiveFrom) {
-        List<CompiledRule> rules = repository.listActiveRulesForCompilation().stream()
+        List<OperationType> operationTypes = repository.listOperationTypesForCompilation();
+        List<RuntimeCompiledRule> rules = repository.listActiveRulesForCompilation().stream()
                 .filter(LimitRule::active)
                 .sorted(Comparator.comparing(LimitRule::code)
                         .thenComparingInt(LimitRule::version)
                         .thenComparing(rule -> rule.id().toString()))
-                .map(RuntimeManifestCompiler::compileRule)
+                .map(rule -> compileRule(rule, operationTypes))
                 .toList();
         List<RuntimeCompiledAssignment> assignments = repository.listEnabledAssignmentsForCompilation().stream()
                 .sorted(Comparator.comparing(RuntimeCompiledAssignment::ruleCode)
@@ -145,6 +151,23 @@ public class RuntimeManifestCompiler {
                 payload.diagnostics(),
                 payload
         );
+    }
+
+    private static List<String> operationTypeCodes(
+            RuleSelector<OperationSelectorType> selector,
+            List<OperationType> operationTypes
+    ) {
+        return switch (selector.type()) {
+            case ANY -> List.of();
+            case TYPE -> List.of(selector.value());
+            case FAMILY -> operationTypes.stream()
+                    .filter(OperationType::enabled)
+                    .filter(type -> selector.value().equals(type.familyCode()))
+                    .sorted(Comparator.comparingInt(OperationType::sortOrder)
+                            .thenComparing(OperationType::code))
+                    .map(OperationType::code)
+                    .toList();
+        };
     }
 
     private void validateEffectiveFrom(Instant effectiveFrom, Instant now) {
