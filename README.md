@@ -70,13 +70,19 @@ expanded to concrete enabled operation type codes before publishing.
 
 Endpoints:
 
+- `GET /internal/v1/limit-management/runtime-manifests?at={instant}&limit={n}`
 - `POST /internal/v1/limit-management/runtime-manifests`
+- `GET /internal/v1/limit-management/runtime-manifests/active?at={instant}`
 - `GET /internal/v1/limit-management/runtime-manifests/effective?at={instant}`
 - `GET /internal/v1/limit-management/runtime-manifests/scheduled?after={instant}&limit={n}`
 - `GET /internal/v1/limit-management/runtime-manifests/{manifestId}`
+- `POST /internal/v1/limit-management/runtime-manifests/{manifestId}/rollback`
 
 Compilation rejects requests where `effectiveFrom` is earlier than
 `now + pay-limit-management.runtime-manifest.min-activation-lead-time`.
+Lifecycle history derives `SCHEDULED`, `ACTIVE`, and `SUPERSEDED` at the
+requested `at` instant. Rollback creates a new immutable runtime manifest
+version from an older payload and a new `effectiveFrom`.
 
 Full test-profile startup is owned by `../infra/run-test.ps1`: non-secret
 database config is loaded from Config Server branch `test`, and

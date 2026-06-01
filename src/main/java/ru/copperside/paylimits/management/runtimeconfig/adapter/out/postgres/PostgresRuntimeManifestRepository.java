@@ -29,6 +29,7 @@ import ru.copperside.paylimits.management.runtimeconfig.application.port.out.Run
 import ru.copperside.paylimits.management.runtimeconfig.domain.RuntimeCompiledAssignment;
 import ru.copperside.paylimits.management.runtimeconfig.domain.RuntimeManifest;
 import ru.copperside.paylimits.management.runtimeconfig.domain.RuntimeManifestDescriptor;
+import ru.copperside.paylimits.management.runtimeconfig.domain.RuntimeManifestLifecycleStatus;
 import ru.copperside.paylimits.management.runtimeconfig.domain.RuntimeManifestPayload;
 import ru.copperside.paylimits.management.runtimeconfig.domain.RuntimeManifestProblemException;
 import ru.copperside.paylimits.management.runtimeconfig.domain.RuntimeManifestStatus;
@@ -202,6 +203,16 @@ public class PostgresRuntimeManifestRepository implements RuntimeManifestReposit
                 """, (rs, rowNum) -> mapDescriptor(rs), Timestamp.from(after), Math.max(1, limit));
     }
 
+    @Override
+    public List<RuntimeManifestDescriptor> listManifests(int limit) {
+        return jdbcTemplate.query("""
+                select id, version, checksum, created_at, effective_from
+                from limit_management.runtime_manifests
+                order by version desc
+                limit ?
+                """, (rs, rowNum) -> mapDescriptor(rs), Math.max(1, limit));
+    }
+
     private void validateManifest(RuntimeManifest manifest) {
         if (manifest == null || manifest.payload() == null) {
             throw new IllegalArgumentException("Runtime manifest payload must be present");
@@ -280,7 +291,8 @@ public class PostgresRuntimeManifestRepository implements RuntimeManifestReposit
                 rs.getInt("version"),
                 rs.getString("checksum"),
                 rs.getTimestamp("created_at").toInstant(),
-                rs.getTimestamp("effective_from").toInstant()
+                rs.getTimestamp("effective_from").toInstant(),
+                null
         );
     }
 

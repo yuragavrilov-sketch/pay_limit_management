@@ -10,6 +10,7 @@ import ru.copperside.paylimits.management.runtimeconfig.domain.RuntimeCompiledAs
 import ru.copperside.paylimits.management.runtimeconfig.domain.RuntimeCompiledRule;
 import ru.copperside.paylimits.management.runtimeconfig.domain.RuntimeManifest;
 import ru.copperside.paylimits.management.runtimeconfig.domain.RuntimeManifestDescriptor;
+import ru.copperside.paylimits.management.runtimeconfig.domain.RuntimeManifestLifecycleStatus;
 import ru.copperside.paylimits.management.runtimeconfig.domain.RuntimeManifestPayload;
 import ru.copperside.paylimits.management.runtimeconfig.domain.RuntimeManifestProblemException;
 import ru.copperside.paylimits.management.runtimeconfig.domain.RuntimeManifestStatus;
@@ -79,7 +80,39 @@ public class RuntimeManifestCompiler {
         if (limit < 1) {
             throw new RuntimeManifestProblemException("VALIDATION_ERROR", "limit must be positive");
         }
-        return repository.listScheduledManifests(after, limit);
+        return repository.listScheduledManifests(after, limit).stream()
+                .map(descriptor -> new RuntimeManifestDescriptor(
+                        descriptor.id(),
+                        descriptor.version(),
+                        descriptor.checksum(),
+                        descriptor.createdAt(),
+                        descriptor.effectiveFrom(),
+                        RuntimeManifestLifecycleStatus.SCHEDULED
+                ))
+                .toList();
+    }
+
+    public List<RuntimeManifestDescriptor> listLifecycle(Instant at, int limit) {
+        if (at == null) {
+            throw new RuntimeManifestProblemException("VALIDATION_ERROR", "at must not be null");
+        }
+        if (limit < 1) {
+            throw new RuntimeManifestProblemException("VALIDATION_ERROR", "limit must be positive");
+        }
+        Integer activeVersion = repository.findEffectiveManifest(at)
+                .map(RuntimeManifest::version)
+                .orElse(null);
+        return repository.listManifests(limit).stream()
+                .map(descriptor -> withLifecycleStatus(descriptor, at, activeVersion))
+                .toList();
+    }
+
+    public RuntimeManifest rollback(UUID sourceManifestId, Instant effectiveFrom) {
+        RuntimeManifest source = getManifest(sourceManifestId);
+        Instant now = canonicalInstant(Instant.now(clock));
+        validateEffectiveFrom(effectiveFrom, now);
+        Instant canonicalEffectiveFrom = canonicalInstant(effectiveFrom);
+        return repository.saveCompiledManifest(version -> buildRollbackManifest(source, version, now, canonicalEffectiveFrom));
     }
 
     public static RuntimeCompiledRule compileRule(LimitRule rule, List<OperationType> operationTypes) {
@@ -152,6 +185,66 @@ public class RuntimeManifestCompiler {
                 payload.memberships(),
                 payload.diagnostics(),
                 payload
+        );
+    }
+
+    private RuntimeManifest buildRollbackManifest(
+            RuntimeManifest source,
+            int version,
+            Instant createdAt,
+            Instant effectiveFrom
+    ) {
+        RuntimeManifestPayload payload = new RuntimeManifestPayload(
+                version,
+                RuntimeManifestStatus.VALID,
+                createdAt,
+                effectiveFrom,
+                source.ruleCount(),
+                source.assignmentCount(),
+                source.membershipCount(),
+                source.rules(),
+                source.assignments(),
+                source.memberships(),
+                source.diagnostics()
+        );
+        return new RuntimeManifest(
+                UUID.randomUUID(),
+                payload.version(),
+                payload.status(),
+                canonicalJson.checksum(payload),
+                payload.createdAt(),
+                payload.effectiveFrom(),
+                payload.ruleCount(),
+                payload.assignmentCount(),
+                payload.membershipCount(),
+                payload.rules(),
+                payload.assignments(),
+                payload.memberships(),
+                payload.diagnostics(),
+                payload
+        );
+    }
+
+    private RuntimeManifestDescriptor withLifecycleStatus(
+            RuntimeManifestDescriptor descriptor,
+            Instant at,
+            Integer activeVersion
+    ) {
+        RuntimeManifestLifecycleStatus lifecycleStatus;
+        if (descriptor.effectiveFrom().isAfter(at)) {
+            lifecycleStatus = RuntimeManifestLifecycleStatus.SCHEDULED;
+        } else if (activeVersion != null && descriptor.version() == activeVersion) {
+            lifecycleStatus = RuntimeManifestLifecycleStatus.ACTIVE;
+        } else {
+            lifecycleStatus = RuntimeManifestLifecycleStatus.SUPERSEDED;
+        }
+        return new RuntimeManifestDescriptor(
+                descriptor.id(),
+                descriptor.version(),
+                descriptor.checksum(),
+                descriptor.createdAt(),
+                descriptor.effectiveFrom(),
+                lifecycleStatus
         );
     }
 

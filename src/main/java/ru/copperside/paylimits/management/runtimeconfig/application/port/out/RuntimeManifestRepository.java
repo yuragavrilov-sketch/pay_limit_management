@@ -30,6 +30,8 @@ public interface RuntimeManifestRepository {
 
     List<RuntimeManifestDescriptor> listScheduledManifests(Instant after, int limit);
 
+    List<RuntimeManifestDescriptor> listManifests(int limit);
+
     @FunctionalInterface
     interface CompiledRuntimeManifestFactory {
         RuntimeManifest create(int version);

@@ -39,18 +39,34 @@ public class RuntimeManifestController {
         return ApiResponse.success(RuntimeManifestResponse.from(compiler().compile(request.effectiveFrom())), clock);
     }
 
+    @GetMapping
+    public ApiResponse<List<RuntimeManifestDescriptorResponse>> listManifestLifecycle(
+            @RequestParam Instant at,
+            @RequestParam(defaultValue = "20") @Min(1) @Max(100) int limit
+    ) {
+        List<RuntimeManifestDescriptorResponse> descriptors = compiler().listLifecycle(at, limit).stream()
+                .map(RuntimeManifestDescriptorResponse::from)
+                .toList();
+        return ApiResponse.success(descriptors, clock);
+    }
+
+    @GetMapping("/active")
+    public ApiResponse<RuntimeManifestResponse> getActiveManifest(@RequestParam Instant at) {
+        return ApiResponse.success(RuntimeManifestResponse.from(compiler().getEffective(at)), clock);
+    }
+
     @GetMapping("/effective")
     public ApiResponse<RuntimeManifestResponse> getEffectiveManifest(@RequestParam Instant at) {
         return ApiResponse.success(RuntimeManifestResponse.from(compiler().getEffective(at)), clock);
     }
 
     @GetMapping("/scheduled")
-    public ApiResponse<List<RuntimeManifestDescriptorResponse>> listScheduledManifests(
+    public ApiResponse<List<RuntimeManifestScheduledDescriptorResponse>> listScheduledManifests(
             @RequestParam Instant after,
             @RequestParam(defaultValue = "20") @Min(1) @Max(100) int limit
     ) {
-        List<RuntimeManifestDescriptorResponse> descriptors = compiler().listScheduled(after, limit).stream()
-                .map(RuntimeManifestDescriptorResponse::from)
+        List<RuntimeManifestScheduledDescriptorResponse> descriptors = compiler().listScheduled(after, limit).stream()
+                .map(RuntimeManifestScheduledDescriptorResponse::from)
                 .toList();
         return ApiResponse.success(descriptors, clock);
     }
@@ -60,6 +76,14 @@ public class RuntimeManifestController {
         return ApiResponse.success(RuntimeManifestResponse.from(compiler().getManifest(manifestId)), clock);
     }
 
+    @PostMapping("/{manifestId}/rollback")
+    public ApiResponse<RuntimeManifestResponse> rollbackManifest(
+            @PathVariable UUID manifestId,
+            @Valid @RequestBody RollbackRuntimeManifestRequest request
+    ) {
+        return ApiResponse.success(RuntimeManifestResponse.from(compiler().rollback(manifestId, request.effectiveFrom())), clock);
+    }
+
     private RuntimeManifestCompiler compiler() {
         return compilerProvider.getIfAvailable(() -> {
             throw new IllegalStateException("Runtime manifest compiler is unavailable");
@@ -67,5 +91,8 @@ public class RuntimeManifestController {
     }
 
     public record CompileRuntimeManifestRequest(@NotNull Instant effectiveFrom) {
+    }
+
+    public record RollbackRuntimeManifestRequest(@NotNull Instant effectiveFrom) {
     }
 }

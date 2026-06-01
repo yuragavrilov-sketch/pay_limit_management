@@ -22,6 +22,7 @@ import ru.copperside.paylimits.management.runtimeconfig.domain.RuntimeManifestPa
 import ru.copperside.paylimits.management.runtimeconfig.domain.RuntimeManifestProblemException;
 import ru.copperside.paylimits.management.runtimeconfig.domain.RuntimeManifestStatus;
 import ru.copperside.paylimits.management.runtimeconfig.domain.RuntimeMerchantGroupMembership;
+import ru.copperside.paylimits.management.runtimeconfig.domain.RuntimeManifestLifecycleStatus;
 
 import java.time.Clock;
 import java.time.Duration;
@@ -145,6 +146,42 @@ class RuntimeManifestCompilerTest {
         assertThat(manifest.rules()).extracting(RuntimeCompiledRule::code).containsExactly("RULE_A", "RULE_Z");
         assertThat(manifest.assignments()).extracting(RuntimeCompiledAssignment::ruleCode).containsExactly("RULE_A", "RULE_Z");
         assertThat(manifest.memberships()).extracting(RuntimeMerchantGroupMembership::merchantId).containsExactly("502118", "502119");
+    }
+
+    @Test
+    void listsRuntimeManifestLifecycleAtInstant() {
+        LimitRule rule = repository.addActiveRule("RULE_SBP_PHONE_DAY");
+        repository.addAssignment(rule.id(), rule.code(), AssignmentOwnerType.MERCHANT, "502118", LimitMode.LIMITED, "3000000.00");
+        RuntimeManifest old = compiler.compile(Instant.parse("2026-05-29T10:15:00Z"));
+        RuntimeManifest active = compiler.compile(Instant.parse("2026-05-29T10:30:00Z"));
+        RuntimeManifest scheduled = compiler.compile(Instant.parse("2026-05-29T10:45:00Z"));
+
+        var descriptors = compiler.listLifecycle(Instant.parse("2026-05-29T10:35:00Z"), 10);
+
+        assertThat(descriptors).extracting(ru.copperside.paylimits.management.runtimeconfig.domain.RuntimeManifestDescriptor::id)
+                .containsExactly(scheduled.id(), active.id(), old.id());
+        assertThat(descriptors).extracting(ru.copperside.paylimits.management.runtimeconfig.domain.RuntimeManifestDescriptor::lifecycleStatus).containsExactly(
+                RuntimeManifestLifecycleStatus.SCHEDULED,
+                RuntimeManifestLifecycleStatus.ACTIVE,
+                RuntimeManifestLifecycleStatus.SUPERSEDED);
+    }
+
+    @Test
+    void rollbackCopiesOldPayloadIntoNewVersionWithNewEffectiveFrom() {
+        LimitRule rule = repository.addActiveRule("RULE_SBP_PHONE_DAY");
+        repository.addAssignment(rule.id(), rule.code(), AssignmentOwnerType.MERCHANT, "502118", LimitMode.LIMITED, "3000000.00");
+        RuntimeManifest source = compiler.compile(Instant.parse("2026-05-29T10:15:00Z"));
+
+        RuntimeManifest rollback = compiler.rollback(source.id(), Instant.parse("2026-05-29T10:30:00Z"));
+
+        assertThat(rollback.version()).isEqualTo(2);
+        assertThat(rollback.createdAt()).isEqualTo(NOW);
+        assertThat(rollback.effectiveFrom()).isEqualTo(Instant.parse("2026-05-29T10:30:00Z"));
+        assertThat(rollback.rules()).isEqualTo(source.rules());
+        assertThat(rollback.assignments()).isEqualTo(source.assignments());
+        assertThat(rollback.memberships()).isEqualTo(source.memberships());
+        assertThat(rollback.checksum()).isEqualTo(new RuntimeManifestCanonicalJson().checksum(rollback.payload()));
+        assertThat(rollback.checksum()).isNotEqualTo(source.checksum());
     }
 
     private RuntimeManifestPayload payload(int version, Instant createdAt, Instant effectiveFrom, List<RuntimeCompiledRule> rules) {
@@ -303,6 +340,22 @@ class RuntimeManifestCompilerTest {
                 int limit
         ) {
             return List.of();
+        }
+
+        @Override
+        public List<ru.copperside.paylimits.management.runtimeconfig.domain.RuntimeManifestDescriptor> listManifests(int limit) {
+            return manifests.stream()
+                    .sorted(Comparator.comparingInt(RuntimeManifest::version).reversed())
+                    .limit(limit)
+                    .map(manifest -> new ru.copperside.paylimits.management.runtimeconfig.domain.RuntimeManifestDescriptor(
+                            manifest.id(),
+                            manifest.version(),
+                            manifest.checksum(),
+                            manifest.createdAt(),
+                            manifest.effectiveFrom(),
+                            null
+                    ))
+                    .toList();
         }
     }
 }

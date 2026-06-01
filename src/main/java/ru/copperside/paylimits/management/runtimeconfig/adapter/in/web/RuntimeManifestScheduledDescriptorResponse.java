@@ -1,27 +1,24 @@
 package ru.copperside.paylimits.management.runtimeconfig.adapter.in.web;
 
 import ru.copperside.paylimits.management.runtimeconfig.domain.RuntimeManifestDescriptor;
-import ru.copperside.paylimits.management.runtimeconfig.domain.RuntimeManifestLifecycleStatus;
 
 import java.time.Instant;
 import java.util.UUID;
 
-public record RuntimeManifestDescriptorResponse(
+public record RuntimeManifestScheduledDescriptorResponse(
         UUID id,
         int version,
         String checksum,
         Instant createdAt,
-        Instant effectiveFrom,
-        RuntimeManifestLifecycleStatus lifecycleStatus
+        Instant effectiveFrom
 ) {
-    public static RuntimeManifestDescriptorResponse from(RuntimeManifestDescriptor descriptor) {
-        return new RuntimeManifestDescriptorResponse(
+    public static RuntimeManifestScheduledDescriptorResponse from(RuntimeManifestDescriptor descriptor) {
+        return new RuntimeManifestScheduledDescriptorResponse(
                 descriptor.id(),
                 descriptor.version(),
                 descriptor.checksum(),
                 descriptor.createdAt(),
-                descriptor.effectiveFrom(),
-                descriptor.lifecycleStatus()
+                descriptor.effectiveFrom()
         );
     }
 }

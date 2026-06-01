@@ -8,6 +8,7 @@ public record RuntimeManifestDescriptor(
         int version,
         String checksum,
         Instant createdAt,
-        Instant effectiveFrom
+        Instant effectiveFrom,
+        RuntimeManifestLifecycleStatus lifecycleStatus
 ) {
 }

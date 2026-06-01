@@ -124,6 +124,57 @@ class RuntimeManifestControllerTest {
     }
 
     @Test
+    void getsActiveRuntimeManifestAlias() throws Exception {
+        RuntimeManifest manifest = repository.saveCompiledManifest(version -> repository.sampleManifest(
+                version,
+                Instant.parse("2026-05-29T10:15:00Z")
+        ));
+
+        mockMvc.perform(get("/internal/v1/limit-management/runtime-manifests/active")
+                        .queryParam("at", "2026-05-29T10:20:00Z"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.id").value(manifest.id().toString()))
+                .andExpect(jsonPath("$.data.effectiveFrom").value("2026-05-29T10:15:00Z"));
+    }
+
+    @Test
+    void listsRuntimeManifestLifecycleHistory() throws Exception {
+        repository.saveCompiledManifest(version -> repository.sampleManifest(version, Instant.parse("2026-05-29T10:15:00Z")));
+        RuntimeManifest active = repository.saveCompiledManifest(version -> repository.sampleManifest(version, Instant.parse("2026-05-29T10:30:00Z")));
+        RuntimeManifest scheduled = repository.saveCompiledManifest(version -> repository.sampleManifest(version, Instant.parse("2026-05-29T10:45:00Z")));
+
+        mockMvc.perform(get("/internal/v1/limit-management/runtime-manifests")
+                        .queryParam("at", "2026-05-29T10:35:00Z")
+                        .queryParam("limit", "10"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data[0].id").value(scheduled.id().toString()))
+                .andExpect(jsonPath("$.data[0].lifecycleStatus").value("SCHEDULED"))
+                .andExpect(jsonPath("$.data[1].id").value(active.id().toString()))
+                .andExpect(jsonPath("$.data[1].lifecycleStatus").value("ACTIVE"))
+                .andExpect(jsonPath("$.data[2].lifecycleStatus").value("SUPERSEDED"));
+    }
+
+    @Test
+    void rollsBackRuntimeManifestIntoNewScheduledVersion() throws Exception {
+        RuntimeManifest source = repository.saveCompiledManifest(version -> repository.sampleManifest(
+                version,
+                Instant.parse("2026-05-29T10:15:00Z")
+        ));
+
+        mockMvc.perform(post("/internal/v1/limit-management/runtime-manifests/{manifestId}/rollback", source.id())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "effectiveFrom": "2026-05-29T10:30:00Z"
+                                }
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.version").value(2))
+                .andExpect(jsonPath("$.data.effectiveFrom").value("2026-05-29T10:30:00Z"))
+                .andExpect(jsonPath("$.data.rules[0].code").value("RULE_SBP_PHONE_DAY"));
+    }
+
+    @Test
     void mapsMissingEffectiveRuntimeManifestToNotFound() throws Exception {
         mockMvc.perform(get("/internal/v1/limit-management/runtime-manifests/effective")
                         .queryParam("at", "2026-05-29T10:00:00Z"))
@@ -145,7 +196,8 @@ class RuntimeManifestControllerTest {
                 .andExpect(jsonPath("$.data[0].id").value(manifest.id().toString()))
                 .andExpect(jsonPath("$.data[0].version").value(manifest.version()))
                 .andExpect(jsonPath("$.data[0].checksum").value(manifest.checksum()))
-                .andExpect(jsonPath("$.data[0].effectiveFrom").value("2026-05-29T10:15:00Z"));
+                .andExpect(jsonPath("$.data[0].effectiveFrom").value("2026-05-29T10:15:00Z"))
+                .andExpect(jsonPath("$.data[0].lifecycleStatus").doesNotExist());
     }
 
     @Test
@@ -339,7 +391,24 @@ class RuntimeManifestControllerTest {
                             manifest.version(),
                             manifest.checksum(),
                             manifest.createdAt(),
-                            manifest.effectiveFrom()
+                            manifest.effectiveFrom(),
+                            null
+                    ))
+                    .toList();
+        }
+
+        @Override
+        public List<RuntimeManifestDescriptor> listManifests(int limit) {
+            return manifests.stream()
+                    .sorted(Comparator.comparingInt(RuntimeManifest::version).reversed())
+                    .limit(limit)
+                    .map(manifest -> new RuntimeManifestDescriptor(
+                            manifest.id(),
+                            manifest.version(),
+                            manifest.checksum(),
+                            manifest.createdAt(),
+                            manifest.effectiveFrom(),
+                            null
                     ))
                     .toList();
         }
