@@ -11,7 +11,7 @@ spring:
     default: local
   config:
     import:
-      - optional:configserver:${CONFIG_SERVER_URL:http://pay-config:8080}
+      - optional:configserver:${CONFIG_SERVER_URL:http://pay-payconfig-server:8080}
       - optional:vault://
   datasource:
     url: ${PAY_LIMIT_MANAGEMENT_DB_URL:jdbc:postgresql://localhost:5432/pay_admin?currentSchema=limit_management}

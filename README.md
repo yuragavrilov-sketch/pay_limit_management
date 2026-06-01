@@ -24,7 +24,7 @@ PAY_ALL Config Server + Vault configuration model.
 | `SERVER_PORT` | `8084` | HTTP port |
 | `PAY_ENVIRONMENT` | `local` | PAY_ALL environment label |
 | `CONFIG_SERVER_ENABLED` | `false` locally, `true` in test/prod | Enables Spring Cloud Config |
-| `CONFIG_SERVER_URL` | `http://pay-config:8080` | Config Server URL |
+| `CONFIG_SERVER_URL` | `http://pay-payconfig-server:8080` | Config Server URL |
 | `CONFIG_SERVER_LABEL` | `${pay.environment}` | Config Server Git label |
 | `VAULT_ENABLED` | `false` locally, `true` in test/prod | Enables Vault Config |
 | `VAULT_KV_BACKEND` | `pay` | Vault KV backend |
