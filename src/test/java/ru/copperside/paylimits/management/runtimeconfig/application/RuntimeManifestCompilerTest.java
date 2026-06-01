@@ -27,6 +27,7 @@ import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneOffset;
+import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
@@ -112,6 +113,22 @@ class RuntimeManifestCompilerTest {
         RuntimeManifestPayload second = payload(1, NOW, Instant.parse("2026-05-29T10:30:00Z"), List.of(compiledRule));
 
         assertThat(canonicalJson.checksum(first)).isNotEqualTo(canonicalJson.checksum(second));
+    }
+
+    @Test
+    void truncatesChecksumInstantsToPostgresPrecision() {
+        Clock subMicroClock = Clock.fixed(Instant.parse("2026-05-29T10:00:00.123456789Z"), ZoneOffset.UTC);
+        RuntimeManifestCompiler subMicroCompiler = new RuntimeManifestCompiler(
+                repository,
+                subMicroClock,
+                Duration.ofMinutes(5));
+        Instant effectiveFrom = Instant.parse("2026-05-29T10:15:00.987654321Z");
+
+        RuntimeManifest manifest = subMicroCompiler.compile(effectiveFrom);
+
+        assertThat(manifest.createdAt()).isEqualTo(subMicroClock.instant().truncatedTo(ChronoUnit.MICROS));
+        assertThat(manifest.effectiveFrom()).isEqualTo(effectiveFrom.truncatedTo(ChronoUnit.MICROS));
+        assertThat(manifest.checksum()).isEqualTo(new RuntimeManifestCanonicalJson().checksum(manifest.payload()));
     }
 
     @Test

@@ -18,6 +18,7 @@ import ru.copperside.paylimits.management.runtimeconfig.domain.RuntimeMerchantGr
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
+import java.time.temporal.ChronoUnit;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
@@ -51,9 +52,10 @@ public class RuntimeManifestCompiler {
     }
 
     public RuntimeManifest compile(Instant effectiveFrom) {
-        Instant now = Instant.now(clock);
+        Instant now = canonicalInstant(Instant.now(clock));
         validateEffectiveFrom(effectiveFrom, now);
-        return repository.saveCompiledManifest(version -> buildManifest(version, now, effectiveFrom));
+        Instant canonicalEffectiveFrom = canonicalInstant(effectiveFrom);
+        return repository.saveCompiledManifest(version -> buildManifest(version, now, canonicalEffectiveFrom));
     }
 
     public RuntimeManifest getManifest(UUID id) {
@@ -193,6 +195,10 @@ public class RuntimeManifestCompiler {
 
     private RuntimeManifestProblemException notFound() {
         return new RuntimeManifestProblemException("RUNTIME_MANIFEST_NOT_FOUND", "Runtime manifest not found");
+    }
+
+    private static Instant canonicalInstant(Instant instant) {
+        return instant == null ? null : instant.truncatedTo(ChronoUnit.MICROS);
     }
 
 }
