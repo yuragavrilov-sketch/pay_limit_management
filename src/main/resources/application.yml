@@ -32,7 +32,7 @@ spring:
       kv:
         backend: ${VAULT_KV_BACKEND:pay}
         default-context: ""
-        application-name: ${VAULT_KV_CONTEXTS:${pay.environment}/${spring.application.name}-db-password,${pay.environment}/${spring.application.name}-internal-admin-key}
+        application-name: ${VAULT_KV_CONTEXTS:${pay.environment}/${spring.application.name}-db-password}
         profiles: []
 
 management:
@@ -53,8 +53,5 @@ springdoc:
 
 pay-limit-management:
   service-name: ${PAY_LIMIT_MANAGEMENT_SERVICE_NAME:Limit Management}
-  internal-admin:
-    api-key: ${INTERNAL_ADMIN_API_KEY:}
-    header-name: ${INTERNAL_ADMIN_HEADER_NAME:X-Internal-Admin-Key}
   runtime-manifest:
     min-activation-lead-time: ${PAY_LIMIT_MANAGEMENT_RUNTIME_MANIFEST_MIN_ACTIVATION_LEAD_TIME:5m}
