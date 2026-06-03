@@ -132,7 +132,31 @@
             <plugin>
                 <groupId>org.springframework.boot</groupId>
                 <artifactId>spring-boot-maven-plugin</artifactId>
+                <executions>
+                    <execution>
+                        <goals>
+                            <goal>repackage</goal>
+                        </goals>
+                    </execution>
+                </executions>
+                <configuration>
+                    <!--suppress UnresolvedMavenProperty -->
+                    <outputDirectory>${session.executionRootDirectory}/deploy</outputDirectory>
+                </configuration>
             </plugin>
         </plugins>
     </build>
+
+    <distributionManagement>
+        <repository>
+            <id>esb-group</id>
+            <name>esb-hosted</name>
+            <url>https://nexus.online.tkbbank.ru/repository/esb-hosted/</url>
+        </repository>
+        <snapshotRepository>
+            <id>esb-group</id>
+            <name>esb-hosted</name>
+            <url>https://nexus.online.tkbbank.ru/repository/esb-snapshot-hosted/</url>
+        </snapshotRepository>
+    </distributionManagement>
 </project>

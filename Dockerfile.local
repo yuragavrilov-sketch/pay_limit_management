@@ -1,0 +1,16 @@
+# Local/dev build for docker-compose ONLY (public base, builds jar in-image).
+# syntax=docker/dockerfile:1
+FROM maven:3.9-eclipse-temurin-21 AS build
+WORKDIR /build
+COPY pom.xml .
+COPY src ./src
+RUN mvn -q -B -DskipTests package
+
+FROM eclipse-temurin:21-jre
+RUN apt-get update && apt-get install -y --no-install-recommends curl && rm -rf /var/lib/apt/lists/*
+WORKDIR /app
+COPY --from=build /build/deploy/pay-limit-management-*.jar app.jar
+ENV JAVA_OPTS="-XX:MaxRAMPercentage=75.0"
+USER 1000
+EXPOSE 8080
+ENTRYPOINT ["sh", "-c", "exec java $JAVA_OPTS -jar /app/app.jar"]
