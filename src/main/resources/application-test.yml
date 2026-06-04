@@ -1,9 +1,8 @@
 pay:
   environment: test
 
-spring:
-  cloud:
-    config:
-      enabled: true
-    vault:
-      enabled: true
+# Config Server and Vault are enabled at DEPLOY time via helm env vars (CONFIG_SERVER_ENABLED /
+# VAULT_ENABLED, plus SPRING_CLOUD_VAULT_AUTHENTICATION=KUBERNETES). They are intentionally NOT
+# enabled here: the corp CI runs `mvn test` with SPRING_PROFILES_ACTIVE=test, and enabling Vault
+# without the Kubernetes auth env would start Spring Cloud Vault on the default TOKEN auth (no token
+# in CI) and fail context initialization for every @SpringBootTest.
