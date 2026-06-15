@@ -151,12 +151,12 @@
         <repository>
             <id>esb-group</id>
             <name>esb-hosted</name>
-            <url>https://nexus.online.tkbbank.ru/repository/esb-hosted/</url>
+            <url>https://repository.transcapital.com/repository/esb-hosted/</url>
         </repository>
         <snapshotRepository>
             <id>esb-group</id>
             <name>esb-hosted</name>
-            <url>https://nexus.online.tkbbank.ru/repository/esb-snapshot-hosted/</url>
+            <url>https://repository.transcapital.com/repository/esb-snapshot-hosted/</url>
         </snapshotRepository>
     </distributionManagement>
 </project>
