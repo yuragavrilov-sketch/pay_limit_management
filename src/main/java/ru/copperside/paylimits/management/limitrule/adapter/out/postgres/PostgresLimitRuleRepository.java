@@ -4,6 +4,7 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnExpression;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
+import org.springframework.transaction.annotation.Transactional;
 import ru.copperside.paylimits.management.limitrule.application.port.out.LimitRuleRepository;
 import ru.copperside.paylimits.management.limitrule.domain.AggregationScope;
 import ru.copperside.paylimits.management.limitrule.domain.AttributeSelectorType;
@@ -185,6 +186,7 @@ public class PostgresLimitRuleRepository implements LimitRuleRepository {
     }
 
     @Override
+    @Transactional
     public LimitRule saveRule(LimitRule rule) {
         try {
             jdbcTemplate.update("""
@@ -217,6 +219,7 @@ public class PostgresLimitRuleRepository implements LimitRuleRepository {
     }
 
     @Override
+    @Transactional
     public LimitRule updateRule(LimitRule rule) {
         try {
             jdbcTemplate.update("""

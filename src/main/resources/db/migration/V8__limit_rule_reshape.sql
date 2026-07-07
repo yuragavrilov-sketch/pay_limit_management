@@ -39,6 +39,7 @@ alter table limit_management.limit_rules
     drop constraint if exists limit_rules_period_chk,
     drop constraint if exists limit_rules_currency_metric_chk,
     alter column target_type drop not null,
+    alter column period drop not null,
     add constraint limit_rules_direction_chk check (direction in ('IN', 'OUT')),
     add constraint limit_rules_target_type_chk check (target_type is null or target_type in ('CARD', 'PHONE', 'ACCOUNT')),
     add constraint limit_rules_metric_chk check (metric in ('AMOUNT', 'COUNT', 'INTERVAL')),

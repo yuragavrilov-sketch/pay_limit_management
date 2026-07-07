@@ -190,6 +190,41 @@ class PostgresLimitRuleRepositoryIntegrationTest {
     }
 
     @Test
+    void savesAndReadsBackIntervalRule() {
+        Instant now = Instant.parse("2026-05-27T09:00:00Z");
+        LimitRule draft = new LimitRule(
+                UUID.randomUUID(),
+                "RULE_SBP_B2C_INTERVAL",
+                1,
+                "RULE_SBP_B2C_INTERVAL",
+                Set.of("SBP_B2C"),
+                OperationDirection.OUT,
+                new Measure(RuleMetric.INTERVAL, null, AggregationScope.TARGET, null, 15),
+                LimitTargetType.PHONE,
+                null,
+                "template",
+                noneSelector(),
+                RuleStatus.DRAFT,
+                now,
+                now,
+                null,
+                null
+        );
+
+        repository.saveRule(draft);
+        LimitRule found = repository.findRule(draft.id()).orElseThrow();
+
+        assertThat(found.measure().metric()).isEqualTo(RuleMetric.INTERVAL);
+        assertThat(found.measure().aggregationScope()).isEqualTo(AggregationScope.TARGET);
+        assertThat(found.measure().intervalMinutes()).isEqualTo(15);
+        assertThat(found.measure().period()).isNull();
+        assertThat(found.limitValue()).isNull();
+        assertThat(found.limitTargetType()).isEqualTo(LimitTargetType.PHONE);
+        assertThat(found.operationTypes()).containsExactly("SBP_B2C");
+        assertThat(found).isEqualTo(draft);
+    }
+
+    @Test
     void mapsUnknownOperationTypeReferenceToProblemCode() {
         Instant now = Instant.parse("2026-05-27T09:00:00Z");
 
