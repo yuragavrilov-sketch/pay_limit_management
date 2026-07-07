@@ -5,6 +5,7 @@ import ru.copperside.paylimits.management.runtimeconfig.domain.RuntimeCompiledAs
 import ru.copperside.paylimits.management.runtimeconfig.domain.RuntimeManifest;
 import ru.copperside.paylimits.management.runtimeconfig.domain.RuntimeManifestDescriptor;
 import ru.copperside.paylimits.management.runtimeconfig.domain.RuntimeMerchantGroupMembership;
+import ru.copperside.paylimits.management.runtimeconfig.domain.RuntimeOperationType;
 
 import java.time.Instant;
 import java.util.List;
@@ -18,6 +19,8 @@ public interface RuntimeManifestRepository {
     List<RuntimeCompiledAssignment> listEnabledAssignmentsForCompilation();
 
     List<RuntimeMerchantGroupMembership> listMembershipsForCompilation();
+
+    List<RuntimeOperationType> listOperationTypesForManifest();
 
     RuntimeManifest saveCompiledManifest(CompiledRuntimeManifestFactory factory);
 

@@ -28,6 +28,8 @@ import ru.copperside.paylimits.management.runtimeconfig.domain.RuntimeManifestDe
 import ru.copperside.paylimits.management.runtimeconfig.domain.RuntimeManifestPayload;
 import ru.copperside.paylimits.management.runtimeconfig.domain.RuntimeManifestStatus;
 import ru.copperside.paylimits.management.runtimeconfig.domain.RuntimeMerchantGroupMembership;
+import ru.copperside.paylimits.management.runtimeconfig.domain.RuntimeOperationType;
+import ru.copperside.paylimits.management.limitrule.domain.CounterpartyType;
 
 import java.math.BigDecimal;
 import java.sql.Timestamp;
@@ -76,6 +78,38 @@ class PostgresRuntimeManifestRepositoryIntegrationTest {
         assertThat(childRows("runtime_manifest_rules", manifest.id())).isEqualTo(1);
         assertThat(childRows("runtime_manifest_assignments", manifest.id())).isEqualTo(1);
         assertThat(childRows("runtime_manifest_memberships", manifest.id())).isEqualTo(1);
+    }
+
+    @Test
+    void persistsSchemaVersionAndOperationTypesOnCompiledAndReadManifest() {
+        SnapshotIds ids = insertSnapshot("SCHEMA_VERSION");
+        RuntimeManifest manifest = repository.saveCompiledManifest(version -> manifest(
+                version,
+                ids,
+                Instant.parse("2026-05-29T10:00:00Z"),
+                Instant.parse("2026-05-29T10:15:00Z")
+        ));
+
+        Integer schemaVersionColumn = jdbcTemplate.queryForObject("""
+                select schema_version
+                from limit_management.runtime_manifests
+                where id = ?
+                """, Integer.class, manifest.id());
+        assertThat(schemaVersionColumn).isEqualTo(2);
+
+        RuntimeManifest reloaded = repository.findManifest(manifest.id()).orElseThrow();
+        assertThat(reloaded.schemaVersion()).isEqualTo(2);
+        assertThat(reloaded.businessTimezone()).isEqualTo("Europe/Moscow");
+        assertThat(reloaded.operationTypes()).isNotEmpty();
+    }
+
+    @Test
+    void listsEnabledOperationTypesSortedByCodeForManifestCompilation() {
+        List<RuntimeOperationType> operationTypes = repository.listOperationTypesForManifest();
+
+        assertThat(operationTypes).isNotEmpty();
+        assertThat(operationTypes).extracting(RuntimeOperationType::code).isSorted();
+        assertThat(operationTypes).extracting(RuntimeOperationType::code).contains("SBP_C2B", "SBP_B2C");
     }
 
     @Test
@@ -202,6 +236,9 @@ class PostgresRuntimeManifestRepositoryIntegrationTest {
                 null
         ));
         RuntimeManifestPayload payload = new RuntimeManifestPayload(
+                2,
+                "Europe/Moscow",
+                List.of(new RuntimeOperationType("SBP_C2B", OperationDirection.IN, CounterpartyType.PHONE)),
                 version,
                 RuntimeManifestStatus.VALID,
                 createdAt,
@@ -216,6 +253,9 @@ class PostgresRuntimeManifestRepositoryIntegrationTest {
         );
         return new RuntimeManifest(
                 UUID.randomUUID(),
+                payload.schemaVersion(),
+                payload.businessTimezone(),
+                payload.operationTypes(),
                 payload.version(),
                 payload.status(),
                 canonicalJson.checksum(payload),

@@ -18,6 +18,6 @@ public class RuntimeManifestUseCaseConfig {
             Clock clock,
             RuntimeManifestProperties properties
     ) {
-        return new RuntimeManifestCompiler(repository, clock, properties.minActivationLeadTime());
+        return new RuntimeManifestCompiler(repository, clock, properties.minActivationLeadTime(), properties.businessTimezone());
     }
 }

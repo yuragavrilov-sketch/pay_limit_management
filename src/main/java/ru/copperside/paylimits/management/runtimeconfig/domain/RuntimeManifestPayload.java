@@ -6,6 +6,9 @@ import java.time.Instant;
 import java.util.List;
 
 public record RuntimeManifestPayload(
+        int schemaVersion,
+        String businessTimezone,
+        List<RuntimeOperationType> operationTypes,
         int version,
         RuntimeManifestStatus status,
         Instant createdAt,
@@ -19,6 +22,7 @@ public record RuntimeManifestPayload(
         List<ManifestDiagnostic> diagnostics
 ) {
     public RuntimeManifestPayload {
+        operationTypes = operationTypes == null ? List.of() : List.copyOf(operationTypes);
         rules = List.copyOf(rules);
         assignments = List.copyOf(assignments);
         memberships = List.copyOf(memberships);

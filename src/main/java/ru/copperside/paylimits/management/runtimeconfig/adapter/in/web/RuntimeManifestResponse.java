@@ -6,6 +6,7 @@ import ru.copperside.paylimits.management.runtimeconfig.domain.RuntimeCompiledRu
 import ru.copperside.paylimits.management.runtimeconfig.domain.RuntimeManifest;
 import ru.copperside.paylimits.management.runtimeconfig.domain.RuntimeManifestStatus;
 import ru.copperside.paylimits.management.runtimeconfig.domain.RuntimeMerchantGroupMembership;
+import ru.copperside.paylimits.management.runtimeconfig.domain.RuntimeOperationType;
 
 import java.time.Instant;
 import java.util.List;
@@ -13,6 +14,9 @@ import java.util.UUID;
 
 public record RuntimeManifestResponse(
         UUID id,
+        int schemaVersion,
+        String businessTimezone,
+        List<RuntimeOperationType> operationTypes,
         int version,
         RuntimeManifestStatus status,
         String checksum,
@@ -29,6 +33,9 @@ public record RuntimeManifestResponse(
     public static RuntimeManifestResponse from(RuntimeManifest manifest) {
         return new RuntimeManifestResponse(
                 manifest.id(),
+                manifest.schemaVersion(),
+                manifest.businessTimezone(),
+                manifest.operationTypes(),
                 manifest.version(),
                 manifest.status(),
                 manifest.checksum(),

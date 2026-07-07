@@ -8,6 +8,9 @@ import java.util.UUID;
 
 public record RuntimeManifest(
         UUID id,
+        int schemaVersion,
+        String businessTimezone,
+        List<RuntimeOperationType> operationTypes,
         int version,
         RuntimeManifestStatus status,
         String checksum,
@@ -23,6 +26,7 @@ public record RuntimeManifest(
         RuntimeManifestPayload payload
 ) {
     public RuntimeManifest {
+        operationTypes = operationTypes == null ? List.of() : List.copyOf(operationTypes);
         rules = List.copyOf(rules);
         assignments = List.copyOf(assignments);
         memberships = List.copyOf(memberships);

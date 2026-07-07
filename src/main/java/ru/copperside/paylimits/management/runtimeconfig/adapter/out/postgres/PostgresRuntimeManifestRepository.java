@@ -34,6 +34,8 @@ import ru.copperside.paylimits.management.runtimeconfig.domain.RuntimeManifestPa
 import ru.copperside.paylimits.management.runtimeconfig.domain.RuntimeManifestProblemException;
 import ru.copperside.paylimits.management.runtimeconfig.domain.RuntimeManifestStatus;
 import ru.copperside.paylimits.management.runtimeconfig.domain.RuntimeMerchantGroupMembership;
+import ru.copperside.paylimits.management.runtimeconfig.domain.RuntimeOperationType;
+import ru.copperside.paylimits.management.limitrule.domain.CounterpartyType;
 
 import java.nio.charset.StandardCharsets;
 import java.sql.ResultSet;
@@ -105,6 +107,20 @@ public class PostgresRuntimeManifestRepository implements RuntimeManifestReposit
     }
 
     @Override
+    public List<RuntimeOperationType> listOperationTypesForManifest() {
+        return jdbcTemplate.query("""
+                select code, direction, counterparty_type
+                from limit_management.operation_types
+                where enabled = true
+                order by code asc
+                """, (rs, rowNum) -> new RuntimeOperationType(
+                rs.getString("code"),
+                OperationDirection.valueOf(rs.getString("direction")),
+                CounterpartyType.valueOf(rs.getString("counterparty_type"))
+        ));
+    }
+
+    @Override
     @Transactional(isolation = Isolation.REPEATABLE_READ)
     public RuntimeManifest saveCompiledManifest(CompiledRuntimeManifestFactory factory) {
         jdbcTemplate.execute("lock table limit_management.runtime_manifests in exclusive mode");
@@ -122,8 +138,8 @@ public class PostgresRuntimeManifestRepository implements RuntimeManifestReposit
             jdbcTemplate.update("""
                     insert into limit_management.runtime_manifests
                         (id, version, status, checksum, created_at, effective_from,
-                         rule_count, assignment_count, membership_count, payload_json)
-                    values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb)
+                         rule_count, assignment_count, membership_count, payload_json, schema_version)
+                    values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?)
                     """,
                     manifest.id(),
                     payload.version(),
@@ -134,7 +150,8 @@ public class PostgresRuntimeManifestRepository implements RuntimeManifestReposit
                     payload.ruleCount(),
                     payload.assignmentCount(),
                     payload.membershipCount(),
-                    payloadJson);
+                    payloadJson,
+                    payload.schemaVersion());
 
             for (int position = 0; position < payload.rules().size(); position++) {
                 var rule = payload.rules().get(position);
@@ -220,7 +237,10 @@ public class PostgresRuntimeManifestRepository implements RuntimeManifestReposit
         if (payload.memberships() == null || payload.membershipCount() != payload.memberships().size()) {
             throw new IllegalArgumentException("Runtime manifest membership count does not match memberships size");
         }
-        if (manifest.version() != payload.version()
+        if (manifest.schemaVersion() != payload.schemaVersion()
+                || !Objects.equals(manifest.businessTimezone(), payload.businessTimezone())
+                || !Objects.equals(manifest.operationTypes(), payload.operationTypes())
+                || manifest.version() != payload.version()
                 || manifest.status() != payload.status()
                 || !Objects.equals(manifest.createdAt(), payload.createdAt())
                 || !Objects.equals(manifest.effectiveFrom(), payload.effectiveFrom())
@@ -262,6 +282,9 @@ public class PostgresRuntimeManifestRepository implements RuntimeManifestReposit
         RuntimeManifestPayload payload = readPayload(rs.getString("payload_json"));
         return new RuntimeManifest(
                 rs.getObject("id", UUID.class),
+                payload.schemaVersion(),
+                payload.businessTimezone(),
+                payload.operationTypes(),
                 rs.getInt("version"),
                 RuntimeManifestStatus.valueOf(rs.getString("status")),
                 rs.getString("checksum"),

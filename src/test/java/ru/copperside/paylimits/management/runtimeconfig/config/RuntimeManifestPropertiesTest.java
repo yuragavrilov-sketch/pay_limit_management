@@ -18,19 +18,31 @@ class RuntimeManifestPropertiesTest {
             .withUserConfiguration(TestConfig.class);
 
     @Test
-    void bindsMinActivationLeadTime() {
+    void bindsMinActivationLeadTimeAndBusinessTimezone() {
         contextRunner
-                .withPropertyValues("pay-limit-management.runtime-manifest.min-activation-lead-time=5m")
+                .withPropertyValues(
+                        "pay-limit-management.runtime-manifest.min-activation-lead-time=5m",
+                        "pay-limit-management.runtime-manifest.business-timezone=Europe/Moscow")
                 .run(context -> {
                     assertThat(context).hasNotFailed();
-                    assertThat(context.getBean(RuntimeManifestProperties.class).minActivationLeadTime())
-                            .isEqualTo(Duration.ofMinutes(5));
+                    RuntimeManifestProperties properties = context.getBean(RuntimeManifestProperties.class);
+                    assertThat(properties.minActivationLeadTime()).isEqualTo(Duration.ofMinutes(5));
+                    assertThat(properties.businessTimezone()).isEqualTo("Europe/Moscow");
                 });
     }
 
     @Test
     void rejectsMissingMinActivationLeadTime() {
-        contextRunner.run(context -> assertThat(context).hasFailed());
+        contextRunner
+                .withPropertyValues("pay-limit-management.runtime-manifest.business-timezone=Europe/Moscow")
+                .run(context -> assertThat(context).hasFailed());
+    }
+
+    @Test
+    void rejectsMissingBusinessTimezone() {
+        contextRunner
+                .withPropertyValues("pay-limit-management.runtime-manifest.min-activation-lead-time=5m")
+                .run(context -> assertThat(context).hasFailed());
     }
 
     @TestConfiguration(proxyBeanMethods = false)

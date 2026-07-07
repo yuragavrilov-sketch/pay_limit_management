@@ -35,6 +35,7 @@ import ru.copperside.paylimits.management.runtimeconfig.domain.RuntimeManifestDe
 import ru.copperside.paylimits.management.runtimeconfig.domain.RuntimeManifestPayload;
 import ru.copperside.paylimits.management.runtimeconfig.domain.RuntimeManifestStatus;
 import ru.copperside.paylimits.management.runtimeconfig.domain.RuntimeMerchantGroupMembership;
+import ru.copperside.paylimits.management.runtimeconfig.domain.RuntimeOperationType;
 
 import java.math.BigDecimal;
 import java.time.Clock;
@@ -233,7 +234,7 @@ class RuntimeManifestControllerTest {
         @Bean("testRuntimeManifestCompiler")
         @Primary
         RuntimeManifestCompiler runtimeManifestCompiler(FakeRepository repository, Clock clock) {
-            return new RuntimeManifestCompiler(repository, clock, java.time.Duration.ofMinutes(5));
+            return new RuntimeManifestCompiler(repository, clock, java.time.Duration.ofMinutes(5), "Europe/Moscow");
         }
     }
 
@@ -310,6 +311,9 @@ class RuntimeManifestControllerTest {
                     .map(RuntimeManifestCompiler::compileRule)
                     .toList();
             RuntimeManifestPayload payload = new RuntimeManifestPayload(
+                    2,
+                    "Europe/Moscow",
+                    List.of(),
                     version,
                     RuntimeManifestStatus.VALID,
                     Instant.parse("2026-05-29T10:00:00Z"),
@@ -324,6 +328,9 @@ class RuntimeManifestControllerTest {
             );
             return new RuntimeManifest(
                     UUID.randomUUID(),
+                    payload.schemaVersion(),
+                    payload.businessTimezone(),
+                    payload.operationTypes(),
                     payload.version(),
                     payload.status(),
                     canonicalJson.checksum(payload),
@@ -353,6 +360,11 @@ class RuntimeManifestControllerTest {
         @Override
         public List<RuntimeMerchantGroupMembership> listMembershipsForCompilation() {
             return List.copyOf(memberships);
+        }
+
+        @Override
+        public List<RuntimeOperationType> listOperationTypesForManifest() {
+            return List.of();
         }
 
         @Override

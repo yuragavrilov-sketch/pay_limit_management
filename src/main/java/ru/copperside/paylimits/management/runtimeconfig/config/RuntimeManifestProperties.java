@@ -9,6 +9,7 @@ import java.time.Duration;
 @Validated
 @ConfigurationProperties(prefix = "pay-limit-management.runtime-manifest")
 public record RuntimeManifestProperties(
-        @NotNull Duration minActivationLeadTime
+        @NotNull Duration minActivationLeadTime,
+        @NotNull String businessTimezone
 ) {
 }

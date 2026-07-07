@@ -25,6 +25,7 @@ import ru.copperside.paylimits.management.runtimeconfig.domain.RuntimeManifestPr
 import ru.copperside.paylimits.management.runtimeconfig.domain.RuntimeManifestStatus;
 import ru.copperside.paylimits.management.runtimeconfig.domain.RuntimeMerchantGroupMembership;
 import ru.copperside.paylimits.management.runtimeconfig.domain.RuntimeManifestLifecycleStatus;
+import ru.copperside.paylimits.management.runtimeconfig.domain.RuntimeOperationType;
 
 import java.time.Clock;
 import java.time.Duration;
@@ -54,7 +55,29 @@ class RuntimeManifestCompilerTest {
     @BeforeEach
     void setUp() {
         repository = new FakeRepository();
-        compiler = new RuntimeManifestCompiler(repository, CLOCK, Duration.ofMinutes(5));
+        compiler = new RuntimeManifestCompiler(repository, CLOCK, Duration.ofMinutes(5), "Europe/Moscow");
+    }
+
+    @Test
+    void compiledPayloadCarriesSchemaVersionBusinessTimezoneAndOperationTypesCatalog() {
+        repository.addActiveRule("RULE_SBP_PHONE_DAY");
+        repository.addOperationType("SBP_C2B", OperationDirection.IN, CounterpartyType.PHONE);
+        repository.addOperationType("SBP_B2C", OperationDirection.OUT, CounterpartyType.PHONE);
+
+        RuntimeManifest manifest = compiler.compile(Instant.parse("2026-05-29T10:15:00Z"));
+        RuntimeManifestPayload payload = manifest.payload();
+
+        assertThat(payload.schemaVersion()).isEqualTo(2);
+        assertThat(payload.businessTimezone()).isEqualTo("Europe/Moscow");
+        assertThat(payload.operationTypes()).isNotEmpty();
+        assertThat(payload.operationTypes()).containsExactly(
+                new RuntimeOperationType("SBP_B2C", OperationDirection.OUT, CounterpartyType.PHONE),
+                new RuntimeOperationType("SBP_C2B", OperationDirection.IN, CounterpartyType.PHONE)
+        );
+        assertThat(manifest.schemaVersion()).isEqualTo(2);
+        assertThat(manifest.businessTimezone()).isEqualTo("Europe/Moscow");
+        assertThat(manifest.operationTypes()).isEqualTo(payload.operationTypes());
+        assertThat(manifest.checksum()).isEqualTo(new RuntimeManifestCanonicalJson().checksum(payload));
     }
 
     @Test
@@ -154,7 +177,8 @@ class RuntimeManifestCompilerTest {
         RuntimeManifestCompiler subMicroCompiler = new RuntimeManifestCompiler(
                 repository,
                 subMicroClock,
-                Duration.ofMinutes(5));
+                Duration.ofMinutes(5),
+                "Europe/Moscow");
         Instant effectiveFrom = Instant.parse("2026-05-29T10:15:00.987654321Z");
 
         RuntimeManifest manifest = subMicroCompiler.compile(effectiveFrom);
@@ -294,6 +318,9 @@ class RuntimeManifestCompilerTest {
 
     private RuntimeManifestPayload payload(int version, Instant createdAt, Instant effectiveFrom, List<RuntimeCompiledRule> rules) {
         return new RuntimeManifestPayload(
+                2,
+                "Europe/Moscow",
+                List.of(),
                 version,
                 RuntimeManifestStatus.VALID,
                 createdAt,
@@ -314,6 +341,13 @@ class RuntimeManifestCompilerTest {
         final List<RuntimeCompiledAssignment> assignments = new ArrayList<>();
         final List<RuntimeMerchantGroupMembership> memberships = new ArrayList<>();
         final List<RuntimeManifest> manifests = new ArrayList<>();
+        final List<RuntimeOperationType> operationTypes = new ArrayList<>();
+
+        RuntimeOperationType addOperationType(String code, OperationDirection direction, CounterpartyType counterpartyType) {
+            RuntimeOperationType operationType = new RuntimeOperationType(code, direction, counterpartyType);
+            operationTypes.add(operationType);
+            return operationType;
+        }
 
         LimitRule addActiveRule(String code) {
             return addActiveRule(code, Set.of("SBP_C2B"));
@@ -399,6 +433,11 @@ class RuntimeManifestCompilerTest {
         @Override
         public List<RuntimeMerchantGroupMembership> listMembershipsForCompilation() {
             return List.copyOf(memberships);
+        }
+
+        @Override
+        public List<RuntimeOperationType> listOperationTypesForManifest() {
+            return List.copyOf(operationTypes);
         }
 
         @Override

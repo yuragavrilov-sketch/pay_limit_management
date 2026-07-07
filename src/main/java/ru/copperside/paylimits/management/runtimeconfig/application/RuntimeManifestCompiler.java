@@ -19,10 +19,12 @@ import ru.copperside.paylimits.management.runtimeconfig.domain.RuntimeManifestPa
 import ru.copperside.paylimits.management.runtimeconfig.domain.RuntimeManifestProblemException;
 import ru.copperside.paylimits.management.runtimeconfig.domain.RuntimeManifestStatus;
 import ru.copperside.paylimits.management.runtimeconfig.domain.RuntimeMerchantGroupMembership;
+import ru.copperside.paylimits.management.runtimeconfig.domain.RuntimeOperationType;
 
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
+import java.time.ZoneId;
 import java.time.temporal.ChronoUnit;
 import java.util.Comparator;
 import java.util.HashMap;
@@ -32,29 +34,43 @@ import java.util.UUID;
 
 public class RuntimeManifestCompiler {
 
+    public static final int SCHEMA_VERSION = 2;
+
     private final RuntimeManifestRepository repository;
     private final Clock clock;
     private final Duration minActivationLeadTime;
+    private final String businessTimezone;
     private final RuntimeManifestCanonicalJson canonicalJson;
 
     public RuntimeManifestCompiler(
             RuntimeManifestRepository repository,
             Clock clock,
-            Duration minActivationLeadTime
+            Duration minActivationLeadTime,
+            String businessTimezone
     ) {
-        this(repository, clock, minActivationLeadTime, new RuntimeManifestCanonicalJson());
+        this(repository, clock, minActivationLeadTime, businessTimezone, new RuntimeManifestCanonicalJson());
     }
 
     RuntimeManifestCompiler(
             RuntimeManifestRepository repository,
             Clock clock,
             Duration minActivationLeadTime,
+            String businessTimezone,
             RuntimeManifestCanonicalJson canonicalJson
     ) {
         this.repository = repository;
         this.clock = clock;
         this.minActivationLeadTime = minActivationLeadTime;
+        this.businessTimezone = validateBusinessTimezone(businessTimezone);
         this.canonicalJson = canonicalJson;
+    }
+
+    private static String validateBusinessTimezone(String businessTimezone) {
+        if (businessTimezone == null) {
+            throw new IllegalArgumentException("businessTimezone must not be null");
+        }
+        ZoneId.of(businessTimezone);
+        return businessTimezone;
     }
 
     public RuntimeManifest compile(Instant effectiveFrom) {
@@ -160,8 +176,14 @@ public class RuntimeManifestCompiler {
                         .thenComparing(RuntimeMerchantGroupMembership::validFrom)
                         .thenComparing(membership -> membership.membershipId().toString()))
                 .toList();
+        List<RuntimeOperationType> operationTypes = repository.listOperationTypesForManifest().stream()
+                .sorted(Comparator.comparing(RuntimeOperationType::code))
+                .toList();
         checkSnapshotInvariant(activeRules, assignments, memberships, createdAt);
         RuntimeManifestPayload payload = new RuntimeManifestPayload(
+                SCHEMA_VERSION,
+                businessTimezone,
+                operationTypes,
                 version,
                 RuntimeManifestStatus.VALID,
                 createdAt,
@@ -176,6 +198,9 @@ public class RuntimeManifestCompiler {
         );
         return new RuntimeManifest(
                 UUID.randomUUID(),
+                payload.schemaVersion(),
+                payload.businessTimezone(),
+                payload.operationTypes(),
                 payload.version(),
                 payload.status(),
                 canonicalJson.checksum(payload),
@@ -238,7 +263,14 @@ public class RuntimeManifestCompiler {
             Instant createdAt,
             Instant effectiveFrom
     ) {
+        // A rollback re-emits the SOURCE manifest's content unchanged under a new version/effectiveFrom
+        // (spec: "rollback = new version with the old content, history stays linear"), so schemaVersion,
+        // businessTimezone and operationTypes are carried over from the source rather than re-derived
+        // from current config — a faithful rollback of content, not a re-compilation under today's schema.
         RuntimeManifestPayload payload = new RuntimeManifestPayload(
+                source.schemaVersion(),
+                source.businessTimezone(),
+                source.operationTypes(),
                 version,
                 RuntimeManifestStatus.VALID,
                 createdAt,
@@ -253,6 +285,9 @@ public class RuntimeManifestCompiler {
         );
         return new RuntimeManifest(
                 UUID.randomUUID(),
+                payload.schemaVersion(),
+                payload.businessTimezone(),
+                payload.operationTypes(),
                 payload.version(),
                 payload.status(),
                 canonicalJson.checksum(payload),
