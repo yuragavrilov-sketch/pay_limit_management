@@ -9,6 +9,7 @@ import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 import ru.copperside.paylimits.management.limitrule.domain.AttributeSelectorType;
+import ru.copperside.paylimits.management.limitrule.domain.CounterpartyType;
 import ru.copperside.paylimits.management.limitrule.domain.DictionaryItem;
 import ru.copperside.paylimits.management.limitrule.domain.LimitRule;
 import ru.copperside.paylimits.management.limitrule.domain.LimitRuleProblemException;
@@ -24,7 +25,9 @@ import ru.copperside.paylimits.management.limitrule.domain.RuleStatus;
 
 import java.time.Instant;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
+import java.util.stream.Collectors;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -66,6 +69,20 @@ class PostgresLimitRuleRepositoryIntegrationTest {
 
         assertThat(types).extracting(OperationType::code).contains("SBP_C2B", "SBP_B2C");
         assertThat(types).allSatisfy(type -> assertThat(type.sortOrder()).isGreaterThanOrEqualTo(0));
+    }
+
+    @Test
+    void listsSevenSpecOperationTypesWithCounterparty() {
+        List<OperationType> types = repository.listOperationTypes();
+        Map<String, OperationType> byCode = types.stream()
+                .collect(Collectors.toMap(OperationType::code, t -> t));
+        assertThat(byCode.keySet()).containsExactlyInAnyOrder(
+                "ECOM", "AFT", "OCT", "SBP_C2B", "SBP_B2C", "SBP_B2B_IN", "SBP_B2B_OUT");
+        assertThat(byCode.get("OCT").direction()).isEqualTo(OperationDirection.OUT);
+        assertThat(byCode.get("OCT").counterpartyType()).isEqualTo(CounterpartyType.CARD);
+        assertThat(byCode.get("AFT").direction()).isEqualTo(OperationDirection.IN);
+        assertThat(byCode.get("SBP_B2C").counterpartyType()).isEqualTo(CounterpartyType.PHONE);
+        assertThat(byCode.get("SBP_B2B_OUT").counterpartyType()).isEqualTo(CounterpartyType.ACCOUNT);
     }
 
     @Test

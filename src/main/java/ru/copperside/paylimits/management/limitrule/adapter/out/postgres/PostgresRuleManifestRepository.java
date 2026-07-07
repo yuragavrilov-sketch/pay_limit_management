@@ -13,8 +13,10 @@ import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Transactional;
 import ru.copperside.paylimits.management.limitrule.application.RuleManifestCanonicalJson;
 import ru.copperside.paylimits.management.limitrule.application.port.out.RuleManifestRepository;
+import ru.copperside.paylimits.management.limitrule.domain.AggregationScope;
 import ru.copperside.paylimits.management.limitrule.domain.AttributeSelectorType;
 import ru.copperside.paylimits.management.limitrule.domain.CompiledRule;
+import ru.copperside.paylimits.management.limitrule.domain.CounterpartyType;
 import ru.copperside.paylimits.management.limitrule.domain.DictionaryItem;
 import ru.copperside.paylimits.management.limitrule.domain.LimitRule;
 import ru.copperside.paylimits.management.limitrule.domain.LimitTargetType;
@@ -83,7 +85,9 @@ public class PostgresRuleManifestRepository implements RuleManifestRepository {
                 Arrays.asList(AttributeSelectorType.values()),
                 Arrays.asList(LimitTargetType.values()),
                 Arrays.asList(RuleMetric.values()),
-                Arrays.asList(RulePeriod.values())
+                Arrays.asList(RulePeriod.values()),
+                Arrays.asList(CounterpartyType.values()),
+                Arrays.asList(AggregationScope.values())
         );
     }
 
@@ -164,7 +168,7 @@ public class PostgresRuleManifestRepository implements RuleManifestRepository {
 
     private List<OperationType> listOperationTypes() {
         return jdbcTemplate.query("""
-                select id, code, name, family_code, direction, enabled, sort_order, created_at, updated_at
+                select id, code, name, family_code, direction, counterparty_type, enabled, sort_order, created_at, updated_at
                 from limit_management.operation_types
                 order by sort_order asc, code asc
                 """, (rs, rowNum) -> mapOperationType(rs));
@@ -222,6 +226,7 @@ public class PostgresRuleManifestRepository implements RuleManifestRepository {
                 rs.getString("name"),
                 rs.getString("family_code"),
                 OperationDirection.valueOf(rs.getString("direction")),
+                CounterpartyType.valueOf(rs.getString("counterparty_type")),
                 rs.getBoolean("enabled"),
                 rs.getInt("sort_order"),
                 rs.getTimestamp("created_at").toInstant(),

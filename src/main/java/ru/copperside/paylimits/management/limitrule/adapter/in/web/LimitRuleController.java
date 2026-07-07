@@ -18,6 +18,7 @@ import ru.copperside.paylimits.management.limitrule.application.LimitRuleService
 import ru.copperside.paylimits.management.limitrule.application.PatchLimitRuleCommand;
 import ru.copperside.paylimits.management.limitrule.application.PatchOperationTypeCommand;
 import ru.copperside.paylimits.management.limitrule.domain.AttributeSelectorType;
+import ru.copperside.paylimits.management.limitrule.domain.CounterpartyType;
 import ru.copperside.paylimits.management.limitrule.domain.LimitTargetType;
 import ru.copperside.paylimits.management.limitrule.domain.OperationDirection;
 import ru.copperside.paylimits.management.limitrule.domain.OperationSelectorType;
@@ -55,13 +56,19 @@ public class LimitRuleController {
         return ApiResponse.success(service().getRuleDictionaries(), clock);
     }
 
+    @GetMapping("/counterparty-types")
+    public ApiResponse<List<CounterpartyTypeResponse>> listCounterpartyTypes() {
+        return ApiResponse.success(CounterpartyTypeResponse.all(), clock);
+    }
+
     @PostMapping("/operation-types")
     public ApiResponse<OperationTypeResponse> createOperationType(@Valid @RequestBody CreateOperationTypeRequest request) {
         var type = service().createOperationType(new CreateOperationTypeCommand(
                 request.code(),
                 request.name(),
                 request.familyCode(),
-                request.direction()
+                request.direction(),
+                request.counterpartyType()
         ));
         return ApiResponse.success(OperationTypeResponse.from(type), clock);
     }
@@ -75,6 +82,7 @@ public class LimitRuleController {
                 request.name(),
                 request.familyCode(),
                 request.direction(),
+                request.counterpartyType(),
                 request.enabled()
         ));
         return ApiResponse.success(OperationTypeResponse.from(type), clock);
@@ -152,11 +160,18 @@ public class LimitRuleController {
             @NotBlank String code,
             @NotBlank String name,
             @NotBlank String familyCode,
-            @NotNull OperationDirection direction
+            @NotNull OperationDirection direction,
+            @NotNull CounterpartyType counterpartyType
     ) {
     }
 
-    public record PatchOperationTypeRequest(String name, String familyCode, OperationDirection direction, Boolean enabled) {
+    public record PatchOperationTypeRequest(
+            String name,
+            String familyCode,
+            OperationDirection direction,
+            CounterpartyType counterpartyType,
+            Boolean enabled
+    ) {
     }
 
     public record CreateRuleRequest(

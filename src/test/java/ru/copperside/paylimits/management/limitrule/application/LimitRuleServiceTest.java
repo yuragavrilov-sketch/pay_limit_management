@@ -3,7 +3,9 @@ package ru.copperside.paylimits.management.limitrule.application;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import ru.copperside.paylimits.management.limitrule.application.port.out.LimitRuleRepository;
+import ru.copperside.paylimits.management.limitrule.domain.AggregationScope;
 import ru.copperside.paylimits.management.limitrule.domain.AttributeSelectorType;
+import ru.copperside.paylimits.management.limitrule.domain.CounterpartyType;
 import ru.copperside.paylimits.management.limitrule.domain.DictionaryItem;
 import ru.copperside.paylimits.management.limitrule.domain.LimitRule;
 import ru.copperside.paylimits.management.limitrule.domain.LimitRuleProblemException;
@@ -60,7 +62,7 @@ class LimitRuleServiceTest {
     @Test
     void createsOperationTypeWithGeneratedIdAndAuditTimestamps() {
         OperationType type = service.createOperationType(new CreateOperationTypeCommand(
-                "SBP_C2C", "SBP C2C", "SBP", OperationDirection.ALL
+                "SBP_C2C", "SBP C2C", "SBP", OperationDirection.ALL, CounterpartyType.PHONE
         ));
 
         assertThat(type.id()).isNotNull();
@@ -74,25 +76,31 @@ class LimitRuleServiceTest {
     @Test
     void rejectsOperationTypeCreationWithoutRequiredFields() {
         assertThatThrownBy(() -> service.createOperationType(new CreateOperationTypeCommand(
-                " ", "SBP C2C", "SBP", OperationDirection.ALL
+                " ", "SBP C2C", "SBP", OperationDirection.ALL, CounterpartyType.PHONE
         )))
                 .isInstanceOf(LimitRuleProblemException.class)
                 .hasMessageContaining("VALIDATION_ERROR");
 
         assertThatThrownBy(() -> service.createOperationType(new CreateOperationTypeCommand(
-                "SBP_C2C", null, "SBP", OperationDirection.ALL
+                "SBP_C2C", null, "SBP", OperationDirection.ALL, CounterpartyType.PHONE
         )))
                 .isInstanceOf(LimitRuleProblemException.class)
                 .hasMessageContaining("VALIDATION_ERROR");
 
         assertThatThrownBy(() -> service.createOperationType(new CreateOperationTypeCommand(
-                "SBP_C2C", "SBP C2C", "", OperationDirection.ALL
+                "SBP_C2C", "SBP C2C", "", OperationDirection.ALL, CounterpartyType.PHONE
         )))
                 .isInstanceOf(LimitRuleProblemException.class)
                 .hasMessageContaining("VALIDATION_ERROR");
 
         assertThatThrownBy(() -> service.createOperationType(new CreateOperationTypeCommand(
-                "SBP_C2C", "SBP C2C", "SBP", null
+                "SBP_C2C", "SBP C2C", "SBP", null, CounterpartyType.PHONE
+        )))
+                .isInstanceOf(LimitRuleProblemException.class)
+                .hasMessageContaining("VALIDATION_ERROR");
+
+        assertThatThrownBy(() -> service.createOperationType(new CreateOperationTypeCommand(
+                "SBP_C2C", "SBP C2C", "SBP", OperationDirection.ALL, null
         )))
                 .isInstanceOf(LimitRuleProblemException.class)
                 .hasMessageContaining("VALIDATION_ERROR");
@@ -103,13 +111,14 @@ class LimitRuleServiceTest {
         OperationType type = repository.addOperationType("SBP_C2C", OperationDirection.ALL, true);
 
         OperationType patched = service.patchOperationType(type.id(), new PatchOperationTypeCommand(
-                "SBP C2C updated", null, OperationDirection.IN, null
+                "SBP C2C updated", null, OperationDirection.IN, null, null
         ));
 
         assertThat(patched.code()).isEqualTo(type.code());
         assertThat(patched.name()).isEqualTo("SBP C2C updated");
         assertThat(patched.familyCode()).isEqualTo(type.familyCode());
         assertThat(patched.direction()).isEqualTo(OperationDirection.IN);
+        assertThat(patched.counterpartyType()).isEqualTo(type.counterpartyType());
         assertThat(patched.enabled()).isEqualTo(type.enabled());
         assertThat(patched.updatedAt()).isEqualTo(NOW);
     }
@@ -124,7 +133,7 @@ class LimitRuleServiceTest {
 
         assertThat(active.active()).isTrue();
         assertThatThrownBy(() -> service.patchOperationType(type.id(), new PatchOperationTypeCommand(
-                null, null, null, false
+                null, null, null, null, false
         )))
                 .isInstanceOf(LimitRuleProblemException.class)
                 .hasMessageContaining("OPERATION_TYPE_IN_USE");
@@ -322,7 +331,7 @@ class LimitRuleServiceTest {
                 "RULE_SBP_C2B_DAY", "SBP C2B daily amount", typeSelector(type.code()), OperationDirection.IN
         ));
         repository.updateOperationType(new OperationType(
-                type.id(), type.code(), type.name(), type.familyCode(), type.direction(), false,
+                type.id(), type.code(), type.name(), type.familyCode(), type.direction(), type.counterpartyType(), false,
                 type.sortOrder(), type.createdAt(), type.updatedAt()
         ));
 
@@ -438,7 +447,8 @@ class LimitRuleServiceTest {
 
         OperationType addOperationType(String code, OperationDirection direction, boolean enabled) {
             OperationType type = new OperationType(
-                    UUID.randomUUID(), code, code, "SBP", direction, enabled, 10, Instant.EPOCH, Instant.EPOCH
+                    UUID.randomUUID(), code, code, "SBP", direction, CounterpartyType.PHONE, enabled, 10,
+                    Instant.EPOCH, Instant.EPOCH
             );
             operationTypes.add(type);
             return type;
@@ -497,7 +507,9 @@ class LimitRuleServiceTest {
                     Arrays.asList(AttributeSelectorType.values()),
                     Arrays.asList(LimitTargetType.values()),
                     Arrays.asList(RuleMetric.values()),
-                    Arrays.asList(RulePeriod.values())
+                    Arrays.asList(RulePeriod.values()),
+                    Arrays.asList(CounterpartyType.values()),
+                    Arrays.asList(AggregationScope.values())
             );
         }
 

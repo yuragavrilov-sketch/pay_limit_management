@@ -15,6 +15,7 @@ import org.springframework.transaction.annotation.Transactional;
 import ru.copperside.paylimits.management.limitassignment.domain.AssignmentOwnerType;
 import ru.copperside.paylimits.management.limitassignment.domain.LimitMode;
 import ru.copperside.paylimits.management.limitrule.domain.AttributeSelectorType;
+import ru.copperside.paylimits.management.limitrule.domain.CounterpartyType;
 import ru.copperside.paylimits.management.limitrule.domain.LimitRule;
 import ru.copperside.paylimits.management.limitrule.domain.LimitTargetType;
 import ru.copperside.paylimits.management.limitrule.domain.OperationDirection;
@@ -75,7 +76,7 @@ public class PostgresRuntimeManifestRepository implements RuntimeManifestReposit
     @Override
     public List<OperationType> listOperationTypesForCompilation() {
         return jdbcTemplate.query("""
-                select id, code, name, family_code, direction, enabled, sort_order, created_at, updated_at
+                select id, code, name, family_code, direction, counterparty_type, enabled, sort_order, created_at, updated_at
                 from limit_management.operation_types
                 order by sort_order asc, code asc
                 """, (rs, rowNum) -> mapOperationType(rs));
@@ -332,6 +333,7 @@ public class PostgresRuntimeManifestRepository implements RuntimeManifestReposit
                 rs.getString("name"),
                 rs.getString("family_code"),
                 OperationDirection.valueOf(rs.getString("direction")),
+                CounterpartyType.valueOf(rs.getString("counterparty_type")),
                 rs.getBoolean("enabled"),
                 rs.getInt("sort_order"),
                 rs.getTimestamp("created_at").toInstant(),

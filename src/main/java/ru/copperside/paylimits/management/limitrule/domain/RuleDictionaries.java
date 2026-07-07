@@ -16,6 +16,8 @@ public record RuleDictionaries(
         List<AttributeSelectorType> attributeSelectorTypes,
         List<LimitTargetType> targetTypes,
         List<RuleMetric> metrics,
-        List<RulePeriod> periods
+        List<RulePeriod> periods,
+        List<CounterpartyType> counterpartyTypes,
+        List<AggregationScope> aggregationScopes
 ) {
 }

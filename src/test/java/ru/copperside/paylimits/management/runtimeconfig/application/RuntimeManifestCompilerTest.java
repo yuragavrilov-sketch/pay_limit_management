@@ -5,6 +5,7 @@ import org.junit.jupiter.api.Test;
 import ru.copperside.paylimits.management.limitassignment.domain.AssignmentOwnerType;
 import ru.copperside.paylimits.management.limitassignment.domain.LimitMode;
 import ru.copperside.paylimits.management.limitrule.domain.AttributeSelectorType;
+import ru.copperside.paylimits.management.limitrule.domain.CounterpartyType;
 import ru.copperside.paylimits.management.limitrule.domain.LimitRule;
 import ru.copperside.paylimits.management.limitrule.domain.LimitTargetType;
 import ru.copperside.paylimits.management.limitrule.domain.OperationDirection;
@@ -248,6 +249,7 @@ class RuntimeManifestCompilerTest {
                     code,
                     familyCode,
                     direction,
+                    CounterpartyType.CARD,
                     enabled,
                     sortOrder,
                     Instant.EPOCH,

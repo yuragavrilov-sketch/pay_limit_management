@@ -9,6 +9,7 @@ public record OperationType(
         String name,
         String familyCode,
         OperationDirection direction,
+        CounterpartyType counterpartyType,
         boolean enabled,
         int sortOrder,
         Instant createdAt,

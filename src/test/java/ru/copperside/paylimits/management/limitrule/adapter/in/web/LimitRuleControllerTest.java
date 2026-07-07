@@ -14,7 +14,9 @@ import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.web.servlet.MockMvc;
 import ru.copperside.paylimits.management.limitrule.application.LimitRuleService;
 import ru.copperside.paylimits.management.limitrule.application.port.out.LimitRuleRepository;
+import ru.copperside.paylimits.management.limitrule.domain.AggregationScope;
 import ru.copperside.paylimits.management.limitrule.domain.AttributeSelectorType;
+import ru.copperside.paylimits.management.limitrule.domain.CounterpartyType;
 import ru.copperside.paylimits.management.limitrule.domain.DictionaryItem;
 import ru.copperside.paylimits.management.limitrule.domain.LimitRule;
 import ru.copperside.paylimits.management.limitrule.domain.LimitTargetType;
@@ -36,6 +38,7 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 
+import static org.hamcrest.Matchers.containsInAnyOrder;
 import static org.hamcrest.Matchers.nullValue;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
@@ -94,11 +97,13 @@ class LimitRuleControllerTest {
                                   "code": "SBP_C2B",
                                   "name": "SBP C2B",
                                   "familyCode": "SBP",
-                                  "direction": "IN"
+                                  "direction": "IN",
+                                  "counterpartyType": "PHONE"
                                 }
                                 """))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.code").value("SBP_C2B"))
+                .andExpect(jsonPath("$.data.counterpartyType").value("PHONE"))
                 .andExpect(jsonPath("$.data.enabled").value(true))
                 .andExpect(jsonPath("$.error").value(nullValue()));
     }
@@ -130,6 +135,7 @@ class LimitRuleControllerTest {
                                   "name": "SBP C2B updated",
                                   "familyCode": "FAST_PAYMENTS",
                                   "direction": "ALL",
+                                  "counterpartyType": "ACCOUNT",
                                   "enabled": false
                                 }
                                 """))
@@ -137,7 +143,16 @@ class LimitRuleControllerTest {
                 .andExpect(jsonPath("$.data.name").value("SBP C2B updated"))
                 .andExpect(jsonPath("$.data.familyCode").value("FAST_PAYMENTS"))
                 .andExpect(jsonPath("$.data.direction").value("ALL"))
+                .andExpect(jsonPath("$.data.counterpartyType").value("ACCOUNT"))
                 .andExpect(jsonPath("$.data.enabled").value(false));
+    }
+
+    @Test
+    void returnsCounterpartyTypes() throws Exception {
+        mockMvc.perform(get("/internal/v1/limit-management/counterparty-types"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data[*].code",
+                        containsInAnyOrder("CARD", "PHONE", "ACCOUNT")));
     }
 
     @Test
@@ -311,6 +326,7 @@ class LimitRuleControllerTest {
                     code,
                     "SBP",
                     direction,
+                    CounterpartyType.PHONE,
                     enabled,
                     10,
                     Instant.parse("2026-05-27T09:00:00Z"),
@@ -372,7 +388,9 @@ class LimitRuleControllerTest {
                     Arrays.asList(AttributeSelectorType.values()),
                     Arrays.asList(LimitTargetType.values()),
                     Arrays.asList(RuleMetric.values()),
-                    Arrays.asList(RulePeriod.values())
+                    Arrays.asList(RulePeriod.values()),
+                    Arrays.asList(CounterpartyType.values()),
+                    Arrays.asList(AggregationScope.values())
             );
         }
 

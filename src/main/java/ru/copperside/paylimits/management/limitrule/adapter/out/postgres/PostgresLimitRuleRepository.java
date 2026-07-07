@@ -5,7 +5,9 @@ import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
 import ru.copperside.paylimits.management.limitrule.application.port.out.LimitRuleRepository;
+import ru.copperside.paylimits.management.limitrule.domain.AggregationScope;
 import ru.copperside.paylimits.management.limitrule.domain.AttributeSelectorType;
+import ru.copperside.paylimits.management.limitrule.domain.CounterpartyType;
 import ru.copperside.paylimits.management.limitrule.domain.DictionaryItem;
 import ru.copperside.paylimits.management.limitrule.domain.LimitRule;
 import ru.copperside.paylimits.management.limitrule.domain.LimitRuleProblemException;
@@ -40,7 +42,7 @@ public class PostgresLimitRuleRepository implements LimitRuleRepository {
     @Override
     public List<OperationType> listOperationTypes() {
         return jdbcTemplate.query("""
-                select id, code, name, family_code, direction, enabled, sort_order, created_at, updated_at
+                select id, code, name, family_code, direction, counterparty_type, enabled, sort_order, created_at, updated_at
                 from limit_management.operation_types
                 order by sort_order asc, code asc
                 """, (rs, rowNum) -> mapOperationType(rs));
@@ -62,14 +64,16 @@ public class PostgresLimitRuleRepository implements LimitRuleRepository {
                 Arrays.asList(AttributeSelectorType.values()),
                 Arrays.asList(LimitTargetType.values()),
                 Arrays.asList(RuleMetric.values()),
-                Arrays.asList(RulePeriod.values())
+                Arrays.asList(RulePeriod.values()),
+                Arrays.asList(CounterpartyType.values()),
+                Arrays.asList(AggregationScope.values())
         );
     }
 
     @Override
     public Optional<OperationType> findOperationType(UUID id) {
         return jdbcTemplate.query("""
-                select id, code, name, family_code, direction, enabled, sort_order, created_at, updated_at
+                select id, code, name, family_code, direction, counterparty_type, enabled, sort_order, created_at, updated_at
                 from limit_management.operation_types
                 where id = ?
                 """, (rs, rowNum) -> mapOperationType(rs), id).stream().findFirst();
@@ -78,7 +82,7 @@ public class PostgresLimitRuleRepository implements LimitRuleRepository {
     @Override
     public Optional<OperationType> findOperationTypeByCode(String code) {
         return jdbcTemplate.query("""
-                select id, code, name, family_code, direction, enabled, sort_order, created_at, updated_at
+                select id, code, name, family_code, direction, counterparty_type, enabled, sort_order, created_at, updated_at
                 from limit_management.operation_types
                 where code = ?
                 """, (rs, rowNum) -> mapOperationType(rs), code).stream().findFirst();
@@ -107,10 +111,11 @@ public class PostgresLimitRuleRepository implements LimitRuleRepository {
         try {
             jdbcTemplate.update("""
                     insert into limit_management.operation_types
-                        (id, code, name, family_code, direction, enabled, sort_order, created_at, updated_at)
-                    values (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        (id, code, name, family_code, direction, counterparty_type, enabled, sort_order, created_at, updated_at)
+                    values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
-                    type.id(), type.code(), type.name(), type.familyCode(), type.direction().name(), type.enabled(),
+                    type.id(), type.code(), type.name(), type.familyCode(), type.direction().name(),
+                    type.counterpartyType().name(), type.enabled(),
                     type.sortOrder(), Timestamp.from(type.createdAt()), Timestamp.from(type.updatedAt()));
             return type;
         } catch (DataIntegrityViolationException ex) {
@@ -123,11 +128,11 @@ public class PostgresLimitRuleRepository implements LimitRuleRepository {
         try {
             jdbcTemplate.update("""
                     update limit_management.operation_types
-                    set name = ?, family_code = ?, direction = ?, enabled = ?, sort_order = ?, updated_at = ?
+                    set name = ?, family_code = ?, direction = ?, counterparty_type = ?, enabled = ?, sort_order = ?, updated_at = ?
                     where id = ?
                     """,
-                    type.name(), type.familyCode(), type.direction().name(), type.enabled(), type.sortOrder(),
-                    Timestamp.from(type.updatedAt()), type.id());
+                    type.name(), type.familyCode(), type.direction().name(), type.counterpartyType().name(),
+                    type.enabled(), type.sortOrder(), Timestamp.from(type.updatedAt()), type.id());
             return type;
         } catch (DataIntegrityViolationException ex) {
             throw mapIntegrityViolation(ex);
@@ -277,6 +282,7 @@ public class PostgresLimitRuleRepository implements LimitRuleRepository {
                 rs.getString("name"),
                 rs.getString("family_code"),
                 OperationDirection.valueOf(rs.getString("direction")),
+                CounterpartyType.valueOf(rs.getString("counterparty_type")),
                 rs.getBoolean("enabled"),
                 rs.getInt("sort_order"),
                 rs.getTimestamp("created_at").toInstant(),

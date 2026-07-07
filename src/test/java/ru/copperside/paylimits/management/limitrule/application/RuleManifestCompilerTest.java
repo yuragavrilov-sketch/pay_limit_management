@@ -3,8 +3,10 @@ package ru.copperside.paylimits.management.limitrule.application;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import ru.copperside.paylimits.management.limitrule.application.port.out.RuleManifestRepository;
+import ru.copperside.paylimits.management.limitrule.domain.AggregationScope;
 import ru.copperside.paylimits.management.limitrule.domain.AttributeSelectorType;
 import ru.copperside.paylimits.management.limitrule.domain.CompiledRule;
+import ru.copperside.paylimits.management.limitrule.domain.CounterpartyType;
 import ru.copperside.paylimits.management.limitrule.domain.DictionaryItem;
 import ru.copperside.paylimits.management.limitrule.domain.LimitRule;
 import ru.copperside.paylimits.management.limitrule.domain.LimitTargetType;
@@ -304,7 +306,9 @@ class RuleManifestCompilerTest {
                     Arrays.asList(AttributeSelectorType.values()),
                     Arrays.asList(LimitTargetType.values()),
                     Arrays.asList(RuleMetric.values()),
-                    Arrays.asList(RulePeriod.values())
+                    Arrays.asList(RulePeriod.values()),
+                    Arrays.asList(CounterpartyType.values()),
+                    Arrays.asList(AggregationScope.values())
             );
         }
 
@@ -331,7 +335,7 @@ class RuleManifestCompilerTest {
         }
 
         private static OperationType operationType(String code, String familyCode, OperationDirection direction, boolean enabled) {
-            return new OperationType(UUID.randomUUID(), code, code, familyCode, direction, enabled, 10, Instant.EPOCH, Instant.EPOCH);
+            return new OperationType(UUID.randomUUID(), code, code, familyCode, direction, CounterpartyType.CARD, enabled, 10, Instant.EPOCH, Instant.EPOCH);
         }
 
         private RuleDictionaries getRuleDictionariesForSnapshot() {
