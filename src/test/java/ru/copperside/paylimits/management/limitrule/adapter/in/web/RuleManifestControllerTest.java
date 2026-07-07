@@ -22,12 +22,15 @@ import ru.copperside.paylimits.management.limitrule.domain.RuleManifestProblemEx
 import ru.copperside.paylimits.management.limitrule.domain.RuleManifestStatus;
 import ru.copperside.paylimits.management.limitrule.domain.RuleSelector;
 import ru.copperside.paylimits.management.limitrule.domain.LimitTargetType;
+import ru.copperside.paylimits.management.limitrule.domain.Measure;
+import ru.copperside.paylimits.management.limitrule.domain.AggregationScope;
 import ru.copperside.paylimits.management.limitrule.domain.OperationDirection;
-import ru.copperside.paylimits.management.limitrule.domain.OperationSelectorType;
 import ru.copperside.paylimits.management.limitrule.domain.RuleMetric;
 import ru.copperside.paylimits.management.limitrule.domain.RulePeriod;
 import ru.copperside.paylimits.management.limitrule.domain.RuleManifestPayload;
 import ru.copperside.paylimits.management.limitrule.application.port.out.RuleManifestRepository;
+
+import java.math.BigDecimal;
 
 import java.time.Clock;
 import java.time.Instant;
@@ -269,12 +272,14 @@ class RuleManifestControllerTest {
                 "RULE_SBP_PHONE_DAY",
                 1,
                 new CompiledRule.Matcher(
-                        new RuleSelector<>(OperationSelectorType.FAMILY, "SBP"),
+                        List.of("SBP_C2B"),
                         OperationDirection.IN,
                         new RuleSelector<>(AttributeSelectorType.NONE, null),
                         LimitTargetType.PHONE
                 ),
-                new CompiledRule.Measure(RuleMetric.AMOUNT, RulePeriod.DAY, "RUB")
+                new Measure(RuleMetric.AMOUNT, RulePeriod.DAY, AggregationScope.OWNER, "RUB", null),
+                new BigDecimal("1000.00"),
+                "template"
         );
         RuleManifestPayload payload = new RuleManifestPayload(
                 1,

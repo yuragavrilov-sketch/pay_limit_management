@@ -111,12 +111,23 @@ class MerchantGroupSchemaIntegrationTest {
 
         assertThat(ruleColumns)
                 .contains(
-                        "operation_selector_type",
-                        "operation_selector_value",
                         "attribute_selector_type",
-                        "attribute_selector_value"
+                        "attribute_selector_value",
+                        "aggregation_scope",
+                        "interval_minutes",
+                        "limit_value",
+                        "error_message_template"
                 )
-                .doesNotContain("operation_type_id");
+                .doesNotContain("operation_type_id", "operation_selector_type", "operation_selector_value");
+
+        List<String> junctionColumns = jdbcTemplate.queryForList("""
+                select column_name
+                from information_schema.columns
+                where table_schema = 'limit_management'
+                  and table_name = 'limit_rule_operation_type'
+                """, String.class);
+
+        assertThat(junctionColumns).contains("rule_id", "operation_type_code");
     }
 
     @Test
@@ -227,20 +238,26 @@ class MerchantGroupSchemaIntegrationTest {
     void databaseRejectsTwoActiveLimitRuleVersionsForSameCode() {
         jdbcTemplate.update("""
                 insert into limit_management.limit_rules
-                    (id, code, version, name, operation_selector_type, operation_selector_value, direction,
-                     attribute_selector_type, attribute_selector_value, target_type, metric, period, currency,
+                    (id, code, version, name, direction,
+                     attribute_selector_type, attribute_selector_value, target_type,
+                     metric, period, aggregation_scope, currency, interval_minutes,
+                     limit_value, error_message_template,
                      status, created_at, updated_at, activated_at, disabled_at)
-                values (?, 'RULE_SBP_C2B_DAY', 1, 'SBP C2B daily amount', 'TYPE', 'SBP_C2B', 'IN',
-                        'NONE', null, 'PHONE', 'AMOUNT', 'DAY', 'RUB', 'ACTIVE', now(), now(), now(), null)
+                values (?, 'RULE_SBP_C2B_DAY', 1, 'SBP C2B daily amount', 'IN',
+                        'NONE', null, 'PHONE', 'AMOUNT', 'DAY', 'OWNER', 'RUB', null,
+                        1000.00, 'template', 'ACTIVE', now(), now(), now(), null)
                 """, UUID.randomUUID());
 
         assertThatThrownBy(() -> jdbcTemplate.update("""
                 insert into limit_management.limit_rules
-                    (id, code, version, name, operation_selector_type, operation_selector_value, direction,
-                     attribute_selector_type, attribute_selector_value, target_type, metric, period, currency,
+                    (id, code, version, name, direction,
+                     attribute_selector_type, attribute_selector_value, target_type,
+                     metric, period, aggregation_scope, currency, interval_minutes,
+                     limit_value, error_message_template,
                      status, created_at, updated_at, activated_at, disabled_at)
-                values (?, 'RULE_SBP_C2B_DAY', 2, 'SBP C2B daily amount v2', 'TYPE', 'SBP_C2B', 'IN',
-                        'NONE', null, 'PHONE', 'AMOUNT', 'DAY', 'RUB', 'ACTIVE', now(), now(), now(), null)
+                values (?, 'RULE_SBP_C2B_DAY', 2, 'SBP C2B daily amount v2', 'IN',
+                        'NONE', null, 'PHONE', 'AMOUNT', 'DAY', 'OWNER', 'RUB', null,
+                        1000.00, 'template', 'ACTIVE', now(), now(), now(), null)
                 """, UUID.randomUUID()))
                 .isInstanceOf(DataIntegrityViolationException.class)
                 .hasMessageContaining("limit_rules_one_active_per_code_uk");

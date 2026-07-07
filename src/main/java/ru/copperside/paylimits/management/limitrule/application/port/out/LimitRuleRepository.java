@@ -18,8 +18,6 @@ public interface LimitRuleRepository {
 
     Optional<OperationType> findOperationTypeByCode(String code);
 
-    boolean operationFamilyExists(String code);
-
     boolean attributeValueExists(AttributeSelectorType type, String code);
 
     OperationType saveOperationType(OperationType type);

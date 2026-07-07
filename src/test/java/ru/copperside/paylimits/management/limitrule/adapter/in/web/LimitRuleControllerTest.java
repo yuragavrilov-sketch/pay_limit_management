@@ -20,8 +20,8 @@ import ru.copperside.paylimits.management.limitrule.domain.CounterpartyType;
 import ru.copperside.paylimits.management.limitrule.domain.DictionaryItem;
 import ru.copperside.paylimits.management.limitrule.domain.LimitRule;
 import ru.copperside.paylimits.management.limitrule.domain.LimitTargetType;
+import ru.copperside.paylimits.management.limitrule.domain.Measure;
 import ru.copperside.paylimits.management.limitrule.domain.OperationDirection;
-import ru.copperside.paylimits.management.limitrule.domain.OperationSelectorType;
 import ru.copperside.paylimits.management.limitrule.domain.OperationType;
 import ru.copperside.paylimits.management.limitrule.domain.RuleDictionaries;
 import ru.copperside.paylimits.management.limitrule.domain.RuleMetric;
@@ -29,6 +29,7 @@ import ru.copperside.paylimits.management.limitrule.domain.RulePeriod;
 import ru.copperside.paylimits.management.limitrule.domain.RuleSelector;
 import ru.copperside.paylimits.management.limitrule.domain.RuleStatus;
 
+import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -83,8 +84,8 @@ class LimitRuleControllerTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.operationFamilies[0].code").value("CARD"))
                 .andExpect(jsonPath("$.data.operationTypes[0].code").value("SBP_C2B"))
-                .andExpect(jsonPath("$.data.operationSelectorTypes[0]").value("ANY"))
                 .andExpect(jsonPath("$.data.attributeSelectorTypes[0]").value("NONE"))
+                .andExpect(jsonPath("$.data.aggregationScopes[0]").value("OWNER"))
                 .andExpect(jsonPath("$.error").value(nullValue()));
     }
 
@@ -117,7 +118,8 @@ class LimitRuleControllerTest {
                                   "code": "",
                                   "name": "SBP C2B",
                                   "familyCode": "SBP",
-                                  "direction": "IN"
+                                  "direction": "IN",
+                                  "counterpartyType": "PHONE"
                                 }
                                 """))
                 .andExpect(status().isBadRequest())
@@ -134,7 +136,7 @@ class LimitRuleControllerTest {
                                 {
                                   "name": "SBP C2B updated",
                                   "familyCode": "FAST_PAYMENTS",
-                                  "direction": "ALL",
+                                  "direction": "OUT",
                                   "counterpartyType": "ACCOUNT",
                                   "enabled": false
                                 }
@@ -142,7 +144,7 @@ class LimitRuleControllerTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.name").value("SBP C2B updated"))
                 .andExpect(jsonPath("$.data.familyCode").value("FAST_PAYMENTS"))
-                .andExpect(jsonPath("$.data.direction").value("ALL"))
+                .andExpect(jsonPath("$.data.direction").value("OUT"))
                 .andExpect(jsonPath("$.data.counterpartyType").value("ACCOUNT"))
                 .andExpect(jsonPath("$.data.enabled").value(false));
     }
@@ -157,49 +159,57 @@ class LimitRuleControllerTest {
 
     @Test
     void createsDraftRule() throws Exception {
+        repository.addOperationType("SBP_C2B", OperationDirection.IN, true);
+
         mockMvc.perform(post("/internal/v1/limit-management/rules")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {
                                   "code": "RULE_SBP_PHONE_DAY",
                                   "name": "SBP phone daily amount",
-                                  "operationSelector": { "type": "FAMILY", "value": "SBP" },
+                                  "operationTypes": ["SBP_C2B"],
                                   "direction": "IN",
-                                  "attributeSelector": { "type": "PAYMENT_SYSTEM", "value": "MIR" },
-                                  "targetType": "PHONE",
-                                  "metric": "AMOUNT",
-                                  "period": "DAY",
-                                  "currency": "RUB"
+                                  "measure": {
+                                    "metric": "AMOUNT",
+                                    "period": "DAY",
+                                    "aggregationScope": "OWNER",
+                                    "currency": "RUB"
+                                  },
+                                  "limitTargetType": "PHONE",
+                                  "limitValue": "1000.00",
+                                  "errorMessageTemplate": "Limit exceeded",
+                                  "attributeSelector": { "type": "PAYMENT_SYSTEM", "value": "MIR" }
                                 }
                                 """))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.code").value("RULE_SBP_PHONE_DAY"))
                 .andExpect(jsonPath("$.data.version").value(1))
                 .andExpect(jsonPath("$.data.status").value("DRAFT"))
-                .andExpect(jsonPath("$.data.operationSelector.type").value("FAMILY"))
-                .andExpect(jsonPath("$.data.operationSelector.value").value("SBP"))
+                .andExpect(jsonPath("$.data.operationTypes[0]").value("SBP_C2B"))
+                .andExpect(jsonPath("$.data.measure.metric").value("AMOUNT"))
+                .andExpect(jsonPath("$.data.measure.currency").value("RUB"))
                 .andExpect(jsonPath("$.data.attributeSelector.type").value("PAYMENT_SYSTEM"))
                 .andExpect(jsonPath("$.data.attributeSelector.value").value("MIR"))
-                .andExpect(jsonPath("$.data.targetType").value("PHONE"))
-                .andExpect(jsonPath("$.data.currency").value("RUB"))
+                .andExpect(jsonPath("$.data.limitTargetType").value("PHONE"))
+                .andExpect(jsonPath("$.data.limitValue").value("1000.00"))
                 .andExpect(jsonPath("$.data.enabled").value(false));
     }
 
     @Test
-    void rejectsInvalidRuleSelector() throws Exception {
+    void rejectsUnknownOperationType() throws Exception {
         mockMvc.perform(post("/internal/v1/limit-management/rules")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {
                                   "code": "RULE_UNKNOWN",
-                                  "name": "Unknown selector",
-                                  "operationSelector": { "type": "FAMILY", "value": "UNKNOWN" },
+                                  "name": "Unknown operation type",
+                                  "operationTypes": ["UNKNOWN"],
                                   "direction": "IN",
-                                  "attributeSelector": { "type": "NONE", "value": null },
-                                  "targetType": "PHONE",
-                                  "metric": "AMOUNT",
-                                  "period": "DAY",
-                                  "currency": "RUB"
+                                  "measure": { "metric": "AMOUNT", "period": "DAY", "aggregationScope": "OWNER", "currency": "RUB" },
+                                  "limitTargetType": "PHONE",
+                                  "limitValue": "1000.00",
+                                  "errorMessageTemplate": "Limit exceeded",
+                                  "attributeSelector": { "type": "NONE", "value": null }
                                 }
                                 """))
                 .andExpect(status().isBadRequest())
@@ -234,22 +244,17 @@ class LimitRuleControllerTest {
                         .content("""
                                 {
                                   "name": "Updated monthly count",
-                                  "operationSelector": { "type": "ANY", "value": null },
-                                  "direction": "ALL",
-                                  "attributeSelector": { "type": "NONE", "value": null },
-                                  "targetType": "ANY",
-                                  "metric": "COUNT",
-                                  "period": "MONTH",
-                                  "currency": null
+                                  "direction": "OUT",
+                                  "measure": { "metric": "COUNT", "period": "MONTH", "aggregationScope": "OWNER" },
+                                  "limitValue": "5"
                                 }
                                 """))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.name").value("Updated monthly count"))
-                .andExpect(jsonPath("$.data.operationSelector.type").value("ANY"))
-                .andExpect(jsonPath("$.data.targetType").value("ANY"))
-                .andExpect(jsonPath("$.data.metric").value("COUNT"))
-                .andExpect(jsonPath("$.data.period").value("MONTH"))
-                .andExpect(jsonPath("$.data.currency").value(nullValue()));
+                .andExpect(jsonPath("$.data.direction").value("OUT"))
+                .andExpect(jsonPath("$.data.measure.metric").value("COUNT"))
+                .andExpect(jsonPath("$.data.measure.period").value("MONTH"))
+                .andExpect(jsonPath("$.data.operationTypes[0]").value("SBP_C2B"));
     }
 
     @Test
@@ -310,7 +315,6 @@ class LimitRuleControllerTest {
 
         private final List<OperationType> operationTypes = new ArrayList<>();
         private final List<LimitRule> rules = new ArrayList<>();
-        private final Set<String> operationFamilies = Set.of("CARD", "SBP");
         private final Set<String> paymentSystems = Set.of("MIR", "VISA");
 
         FakeRepository clear() {
@@ -350,13 +354,13 @@ class LimitRuleControllerTest {
                     code,
                     version,
                     code,
-                    new RuleSelector<>(OperationSelectorType.FAMILY, "SBP"),
+                    Set.of("SBP_C2B"),
                     OperationDirection.IN,
-                    new RuleSelector<>(AttributeSelectorType.NONE, null),
+                    new Measure(RuleMetric.AMOUNT, RulePeriod.DAY, AggregationScope.OWNER, "RUB", null),
                     LimitTargetType.PHONE,
-                    RuleMetric.AMOUNT,
-                    RulePeriod.DAY,
-                    "RUB",
+                    new BigDecimal("1000.00"),
+                    "template",
+                    new RuleSelector<>(AttributeSelectorType.NONE, null),
                     status,
                     Instant.parse("2026-05-27T09:00:00Z"),
                     Instant.parse("2026-05-27T09:00:00Z"),
@@ -375,7 +379,7 @@ class LimitRuleControllerTest {
         @Override
         public RuleDictionaries getRuleDictionaries() {
             return new RuleDictionaries(
-                    dictionaryItems(operationFamilies),
+                    dictionaryItems(Set.of("CARD", "SBP")),
                     listOperationTypes(),
                     dictionaryItems(paymentSystems),
                     dictionaryItems(Set.of("RU")),
@@ -384,7 +388,6 @@ class LimitRuleControllerTest {
                     dictionaryItems(Set.of("DEBIT", "CREDIT")),
                     dictionaryItems(Set.of("STANDARD", "GOLD")),
                     Arrays.asList(OperationDirection.values()),
-                    Arrays.asList(OperationSelectorType.values()),
                     Arrays.asList(AttributeSelectorType.values()),
                     Arrays.asList(LimitTargetType.values()),
                     Arrays.asList(RuleMetric.values()),
@@ -402,11 +405,6 @@ class LimitRuleControllerTest {
         @Override
         public Optional<OperationType> findOperationTypeByCode(String code) {
             return operationTypes.stream().filter(type -> type.code().equals(code)).findFirst();
-        }
-
-        @Override
-        public boolean operationFamilyExists(String code) {
-            return operationFamilies.contains(code);
         }
 
         @Override
@@ -438,9 +436,7 @@ class LimitRuleControllerTest {
         public boolean hasActiveRulesForOperationTypeCode(String operationTypeCode) {
             return rules.stream()
                     .filter(rule -> rule.status() == RuleStatus.ACTIVE)
-                    .map(LimitRule::operationSelector)
-                    .anyMatch(selector -> selector.type() == OperationSelectorType.TYPE
-                            && operationTypeCode.equals(selector.value()));
+                    .anyMatch(rule -> rule.operationTypes().contains(operationTypeCode));
         }
 
         @Override

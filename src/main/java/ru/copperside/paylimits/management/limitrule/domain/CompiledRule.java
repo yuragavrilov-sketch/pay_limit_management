@@ -1,5 +1,7 @@
 package ru.copperside.paylimits.management.limitrule.domain;
 
+import java.math.BigDecimal;
+import java.util.List;
 import java.util.UUID;
 
 public record CompiledRule(
@@ -7,20 +9,18 @@ public record CompiledRule(
         String code,
         int version,
         Matcher matcher,
-        Measure measure
+        Measure measure,
+        BigDecimal limitValue,
+        String errorMessageTemplate
 ) {
     public record Matcher(
-            RuleSelector<OperationSelectorType> operation,
+            List<String> operationTypes,
             OperationDirection direction,
             RuleSelector<AttributeSelectorType> attribute,
             LimitTargetType targetType
     ) {
-    }
-
-    public record Measure(
-            RuleMetric metric,
-            RulePeriod period,
-            String currency
-    ) {
+        public Matcher {
+            operationTypes = operationTypes == null ? List.of() : List.copyOf(operationTypes);
+        }
     }
 }

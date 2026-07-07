@@ -14,13 +14,13 @@ import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.web.servlet.MockMvc;
 import ru.copperside.paylimits.management.limitassignment.domain.AssignmentOwnerType;
 import ru.copperside.paylimits.management.limitassignment.domain.LimitMode;
+import ru.copperside.paylimits.management.limitrule.domain.AggregationScope;
 import ru.copperside.paylimits.management.limitrule.domain.AttributeSelectorType;
 import ru.copperside.paylimits.management.limitrule.domain.LimitRule;
 import ru.copperside.paylimits.management.limitrule.domain.LimitTargetType;
 import ru.copperside.paylimits.management.limitrule.domain.ManifestDiagnostic;
+import ru.copperside.paylimits.management.limitrule.domain.Measure;
 import ru.copperside.paylimits.management.limitrule.domain.OperationDirection;
-import ru.copperside.paylimits.management.limitrule.domain.OperationSelectorType;
-import ru.copperside.paylimits.management.limitrule.domain.OperationType;
 import ru.copperside.paylimits.management.limitrule.domain.RuleMetric;
 import ru.copperside.paylimits.management.limitrule.domain.RulePeriod;
 import ru.copperside.paylimits.management.limitrule.domain.RuleSelector;
@@ -36,6 +36,7 @@ import ru.copperside.paylimits.management.runtimeconfig.domain.RuntimeManifestPa
 import ru.copperside.paylimits.management.runtimeconfig.domain.RuntimeManifestStatus;
 import ru.copperside.paylimits.management.runtimeconfig.domain.RuntimeMerchantGroupMembership;
 
+import java.math.BigDecimal;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
@@ -43,6 +44,7 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 
 import static org.hamcrest.Matchers.nullValue;
@@ -239,14 +241,12 @@ class RuntimeManifestControllerTest {
 
         private final RuntimeManifestCanonicalJson canonicalJson = new RuntimeManifestCanonicalJson();
         final List<LimitRule> rules = new ArrayList<>();
-        final List<OperationType> operationTypes = new ArrayList<>();
         final List<RuntimeCompiledAssignment> assignments = new ArrayList<>();
         final List<RuntimeMerchantGroupMembership> memberships = new ArrayList<>();
         final List<RuntimeManifest> manifests = new ArrayList<>();
 
         FakeRepository clear() {
             rules.clear();
-            operationTypes.clear();
             assignments.clear();
             memberships.clear();
             manifests.clear();
@@ -259,13 +259,13 @@ class RuntimeManifestControllerTest {
                     code,
                     1,
                     code,
-                    new RuleSelector<>(OperationSelectorType.TYPE, "SBP_C2B"),
+                    Set.of("SBP_C2B"),
                     OperationDirection.IN,
-                    new RuleSelector<>(AttributeSelectorType.NONE, null),
+                    new Measure(RuleMetric.AMOUNT, RulePeriod.DAY, AggregationScope.OWNER, "RUB", null),
                     LimitTargetType.PHONE,
-                    RuleMetric.AMOUNT,
-                    RulePeriod.DAY,
-                    "RUB",
+                    new BigDecimal("1000.00"),
+                    "template",
+                    new RuleSelector<>(AttributeSelectorType.NONE, null),
                     RuleStatus.ACTIVE,
                     Instant.EPOCH,
                     Instant.EPOCH,
@@ -308,7 +308,7 @@ class RuntimeManifestControllerTest {
         RuntimeManifest sampleManifest(int version, Instant effectiveFrom) {
             List<RuntimeCompiledRule> compiledRules = rules.stream()
                     .sorted(Comparator.comparing(LimitRule::code))
-                    .map(rule -> RuntimeManifestCompiler.compileRule(rule, operationTypes))
+                    .map(RuntimeManifestCompiler::compileRule)
                     .toList();
             RuntimeManifestPayload payload = new RuntimeManifestPayload(
                     version,
@@ -344,11 +344,6 @@ class RuntimeManifestControllerTest {
         @Override
         public List<LimitRule> listActiveRulesForCompilation() {
             return List.copyOf(rules);
-        }
-
-        @Override
-        public List<OperationType> listOperationTypesForCompilation() {
-            return List.copyOf(operationTypes);
         }
 
         @Override

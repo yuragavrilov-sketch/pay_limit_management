@@ -11,12 +11,13 @@ import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 import ru.copperside.paylimits.management.limitrule.application.RuleManifestCanonicalJson;
+import ru.copperside.paylimits.management.limitrule.domain.AggregationScope;
 import ru.copperside.paylimits.management.limitrule.domain.AttributeSelectorType;
 import ru.copperside.paylimits.management.limitrule.domain.CompiledRule;
 import ru.copperside.paylimits.management.limitrule.domain.LimitRule;
 import ru.copperside.paylimits.management.limitrule.domain.LimitTargetType;
+import ru.copperside.paylimits.management.limitrule.domain.Measure;
 import ru.copperside.paylimits.management.limitrule.domain.OperationDirection;
-import ru.copperside.paylimits.management.limitrule.domain.OperationSelectorType;
 import ru.copperside.paylimits.management.limitrule.domain.RuleManifest;
 import ru.copperside.paylimits.management.limitrule.domain.RuleManifestPayload;
 import ru.copperside.paylimits.management.limitrule.domain.RuleManifestStatus;
@@ -25,8 +26,10 @@ import ru.copperside.paylimits.management.limitrule.domain.RulePeriod;
 import ru.copperside.paylimits.management.limitrule.domain.RuleSelector;
 import ru.copperside.paylimits.management.limitrule.domain.RuleStatus;
 
+import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.List;
+import java.util.Set;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -198,12 +201,14 @@ class PostgresRuleManifestRepositoryIntegrationTest {
                 rule.code(),
                 rule.version(),
                 new CompiledRule.Matcher(
-                        rule.operationSelector(),
+                        rule.operationTypes().stream().sorted().toList(),
                         rule.direction(),
                         rule.attributeSelector(),
-                        rule.targetType()
+                        rule.limitTargetType()
                 ),
-                new CompiledRule.Measure(rule.metric(), rule.period(), rule.currency())
+                rule.measure(),
+                rule.limitValue(),
+                rule.errorMessageTemplate()
         );
         RuleManifestPayload payload = new RuleManifestPayload(
                 version,
@@ -233,13 +238,13 @@ class PostgresRuleManifestRepositoryIntegrationTest {
                 code,
                 version,
                 code,
-                new RuleSelector<>(OperationSelectorType.TYPE, "SBP_C2B"),
+                Set.of("SBP_C2B"),
                 OperationDirection.IN,
-                new RuleSelector<>(AttributeSelectorType.NONE, null),
+                new Measure(RuleMetric.AMOUNT, RulePeriod.DAY, AggregationScope.OWNER, "RUB", null),
                 LimitTargetType.PHONE,
-                RuleMetric.AMOUNT,
-                RulePeriod.DAY,
-                "RUB",
+                new BigDecimal("1000.00"),
+                "template",
+                new RuleSelector<>(AttributeSelectorType.NONE, null),
                 status,
                 now,
                 now,

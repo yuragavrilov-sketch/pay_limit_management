@@ -4,13 +4,13 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import ru.copperside.paylimits.management.limitassignment.domain.AssignmentOwnerType;
 import ru.copperside.paylimits.management.limitassignment.domain.LimitMode;
+import ru.copperside.paylimits.management.limitrule.domain.AggregationScope;
 import ru.copperside.paylimits.management.limitrule.domain.AttributeSelectorType;
 import ru.copperside.paylimits.management.limitrule.domain.CounterpartyType;
 import ru.copperside.paylimits.management.limitrule.domain.LimitRule;
 import ru.copperside.paylimits.management.limitrule.domain.LimitTargetType;
+import ru.copperside.paylimits.management.limitrule.domain.Measure;
 import ru.copperside.paylimits.management.limitrule.domain.OperationDirection;
-import ru.copperside.paylimits.management.limitrule.domain.OperationSelectorType;
-import ru.copperside.paylimits.management.limitrule.domain.OperationType;
 import ru.copperside.paylimits.management.limitrule.domain.RuleMetric;
 import ru.copperside.paylimits.management.limitrule.domain.RulePeriod;
 import ru.copperside.paylimits.management.limitrule.domain.RuleSelector;
@@ -30,10 +30,13 @@ import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.time.temporal.ChronoUnit;
+import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -77,21 +80,16 @@ class RuntimeManifestCompilerTest {
     }
 
     @Test
-    void expandsFamilyOperationSelectorForRuntimeRules() {
-        repository.addOperationType("SBP_B2C", "SBP", OperationDirection.OUT, true, 20);
-        repository.addOperationType("SBP_C2B", "SBP", OperationDirection.IN, true, 10);
-        repository.addOperationType("SBP_DISABLED", "SBP", OperationDirection.IN, false, 5);
-        repository.addOperationType("ECOM", "CARD", OperationDirection.IN, true, 30);
+    void carriesRuleOperationTypesSortedInMatcher() {
         repository.addActiveRule(
                 "RULE_SBP_PHONE_DAY",
-                new RuleSelector<>(OperationSelectorType.FAMILY, "SBP"));
+                orderedSet("SBP_C2B", "SBP_B2C"));
 
         RuntimeManifest manifest = compiler.compile(Instant.parse("2026-05-29T10:15:00Z"));
 
         assertThat(manifest.rules()).hasSize(1);
-        assertThat(manifest.rules().getFirst().matcher().operationMatchesAll()).isFalse();
-        assertThat(manifest.rules().getFirst().matcher().operationTypeCodes())
-                .containsExactly("SBP_C2B", "SBP_B2C");
+        assertThat(manifest.rules().getFirst().matcher().operationTypes())
+                .containsExactly("SBP_B2C", "SBP_C2B");
     }
 
     @Test
@@ -108,7 +106,7 @@ class RuntimeManifestCompilerTest {
     @Test
     void checksumChangesWhenOnlyEffectiveFromChanges() {
         LimitRule rule = repository.addActiveRule("RULE_SBP_PHONE_DAY");
-        RuntimeCompiledRule compiledRule = RuntimeManifestCompiler.compileRule(rule, repository.operationTypes);
+        RuntimeCompiledRule compiledRule = RuntimeManifestCompiler.compileRule(rule);
         RuntimeManifestCanonicalJson canonicalJson = new RuntimeManifestCanonicalJson();
 
         RuntimeManifestPayload first = payload(1, NOW, Instant.parse("2026-05-29T10:15:00Z"), List.of(compiledRule));
@@ -185,6 +183,10 @@ class RuntimeManifestCompilerTest {
         assertThat(rollback.checksum()).isNotEqualTo(source.checksum());
     }
 
+    private static Set<String> orderedSet(String... codes) {
+        return new LinkedHashSet<>(java.util.Arrays.asList(codes));
+    }
+
     private RuntimeManifestPayload payload(int version, Instant createdAt, Instant effectiveFrom, List<RuntimeCompiledRule> rules) {
         return new RuntimeManifestPayload(
                 version,
@@ -204,28 +206,27 @@ class RuntimeManifestCompilerTest {
     static class FakeRepository implements RuntimeManifestRepository {
 
         final List<LimitRule> rules = new ArrayList<>();
-        final List<OperationType> operationTypes = new ArrayList<>();
         final List<RuntimeCompiledAssignment> assignments = new ArrayList<>();
         final List<RuntimeMerchantGroupMembership> memberships = new ArrayList<>();
         final List<RuntimeManifest> manifests = new ArrayList<>();
 
         LimitRule addActiveRule(String code) {
-            return addActiveRule(code, new RuleSelector<>(OperationSelectorType.TYPE, "SBP_C2B"));
+            return addActiveRule(code, Set.of("SBP_C2B"));
         }
 
-        LimitRule addActiveRule(String code, RuleSelector<OperationSelectorType> operationSelector) {
+        LimitRule addActiveRule(String code, Set<String> operationTypes) {
             LimitRule rule = new LimitRule(
                     UUID.randomUUID(),
                     code,
                     1,
                     code,
-                    operationSelector,
+                    operationTypes,
                     OperationDirection.IN,
-                    new RuleSelector<>(AttributeSelectorType.NONE, null),
+                    new Measure(RuleMetric.AMOUNT, RulePeriod.DAY, AggregationScope.OWNER, "RUB", null),
                     LimitTargetType.PHONE,
-                    RuleMetric.AMOUNT,
-                    RulePeriod.DAY,
-                    "RUB",
+                    new BigDecimal("1000.00"),
+                    "template",
+                    new RuleSelector<>(AttributeSelectorType.NONE, null),
                     RuleStatus.ACTIVE,
                     Instant.EPOCH,
                     Instant.EPOCH,
@@ -234,29 +235,6 @@ class RuntimeManifestCompilerTest {
             );
             rules.add(rule);
             return rule;
-        }
-
-        OperationType addOperationType(
-                String code,
-                String familyCode,
-                OperationDirection direction,
-                boolean enabled,
-                int sortOrder
-        ) {
-            OperationType operationType = new OperationType(
-                    UUID.randomUUID(),
-                    code,
-                    code,
-                    familyCode,
-                    direction,
-                    CounterpartyType.CARD,
-                    enabled,
-                    sortOrder,
-                    Instant.EPOCH,
-                    Instant.EPOCH
-            );
-            operationTypes.add(operationType);
-            return operationType;
         }
 
         RuntimeCompiledAssignment addAssignment(
@@ -300,11 +278,6 @@ class RuntimeManifestCompilerTest {
             return rules.stream()
                     .sorted(Comparator.comparing(LimitRule::code))
                     .toList();
-        }
-
-        @Override
-        public List<OperationType> listOperationTypesForCompilation() {
-            return List.copyOf(operationTypes);
         }
 
         @Override

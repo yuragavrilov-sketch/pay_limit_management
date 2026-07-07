@@ -12,7 +12,6 @@ public record RuleDictionaries(
         List<DictionaryItem> cardTypes,
         List<DictionaryItem> cardLevels,
         List<OperationDirection> directions,
-        List<OperationSelectorType> operationSelectorTypes,
         List<AttributeSelectorType> attributeSelectorTypes,
         List<LimitTargetType> targetTypes,
         List<RuleMetric> metrics,

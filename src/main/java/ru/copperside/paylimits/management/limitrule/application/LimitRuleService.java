@@ -4,24 +4,20 @@ import ru.copperside.paylimits.management.limitrule.application.port.out.LimitRu
 import ru.copperside.paylimits.management.limitrule.domain.AttributeSelectorType;
 import ru.copperside.paylimits.management.limitrule.domain.LimitRule;
 import ru.copperside.paylimits.management.limitrule.domain.LimitRuleProblemException;
-import ru.copperside.paylimits.management.limitrule.domain.LimitTargetType;
-import ru.copperside.paylimits.management.limitrule.domain.OperationDirection;
-import ru.copperside.paylimits.management.limitrule.domain.OperationSelectorType;
+import ru.copperside.paylimits.management.limitrule.domain.Measure;
 import ru.copperside.paylimits.management.limitrule.domain.OperationType;
 import ru.copperside.paylimits.management.limitrule.domain.RuleDictionaries;
-import ru.copperside.paylimits.management.limitrule.domain.RuleMetric;
-import ru.copperside.paylimits.management.limitrule.domain.RulePeriod;
 import ru.copperside.paylimits.management.limitrule.domain.RuleSelector;
 import ru.copperside.paylimits.management.limitrule.domain.RuleStatus;
 
 import java.time.Clock;
 import java.time.Instant;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Set;
 import java.util.UUID;
 
 public class LimitRuleService {
-
-    private static final String DEFAULT_CURRENCY = "RUB";
 
     private final LimitRuleRepository repository;
     private final Clock clock;
@@ -91,20 +87,19 @@ public class LimitRuleService {
     public LimitRule createRule(CreateLimitRuleCommand command) {
         requireCommand(command);
         String code = requireText(command.code(), "code");
-        RuleMetric metric = requireEnum(command.metric(), "metric");
         Instant now = Instant.now(clock);
         LimitRule rule = new LimitRule(
                 UUID.randomUUID(),
                 code,
                 repository.nextVersion(code),
                 requireText(command.name(), "name"),
-                validateOperationSelector(command.operationSelector()),
+                validateOperationTypes(command.operationTypes()),
                 requireEnum(command.direction(), "direction"),
+                requireMeasure(command.measure()),
+                command.limitTargetType(),
+                command.limitValue(),
+                requireText(command.errorMessageTemplate(), "errorMessageTemplate"),
                 validateAttributeSelector(command.attributeSelector()),
-                requireEnum(command.targetType(), "targetType"),
-                metric,
-                requireEnum(command.period(), "period"),
-                normalizeCurrency(metric, command.currency(), true),
                 RuleStatus.DRAFT,
                 now,
                 now,
@@ -119,24 +114,24 @@ public class LimitRuleService {
         requireCommand(command);
         LimitRule existing = getRule(id);
         requireDraft(existing);
-        RuleMetric metric = command.metric() == null ? existing.metric() : command.metric();
-        String currency = normalizePatchCurrency(existing, metric, command.currency());
         LimitRule updated = new LimitRule(
                 existing.id(),
                 existing.code(),
                 existing.version(),
                 command.name() == null ? existing.name() : requireText(command.name(), "name"),
-                command.operationSelector() == null
-                        ? existing.operationSelector()
-                        : validateOperationSelector(command.operationSelector()),
+                command.operationTypes() == null
+                        ? existing.operationTypes()
+                        : validateOperationTypes(command.operationTypes()),
                 command.direction() == null ? existing.direction() : command.direction(),
+                command.measure() == null ? existing.measure() : requireMeasure(command.measure()),
+                command.limitTargetType() == null ? existing.limitTargetType() : command.limitTargetType(),
+                command.limitValue() == null ? existing.limitValue() : command.limitValue(),
+                command.errorMessageTemplate() == null
+                        ? existing.errorMessageTemplate()
+                        : requireText(command.errorMessageTemplate(), "errorMessageTemplate"),
                 command.attributeSelector() == null
                         ? existing.attributeSelector()
                         : validateAttributeSelector(command.attributeSelector()),
-                command.targetType() == null ? existing.targetType() : command.targetType(),
-                metric,
-                command.period() == null ? existing.period() : command.period(),
-                currency,
                 existing.status(),
                 existing.createdAt(),
                 Instant.now(clock),
@@ -149,8 +144,6 @@ public class LimitRuleService {
     public LimitRule activateRule(UUID id) {
         LimitRule existing = getRule(id);
         requireDraft(existing);
-        validateOperationSelector(existing.operationSelector());
-        validateAttributeSelector(existing.attributeSelector());
         repository.findActiveByCode(existing.code())
                 .ifPresent(rule -> {
                     throw problem("RULE_STATUS_CONFLICT", "Another active rule already exists");
@@ -161,13 +154,13 @@ public class LimitRuleService {
                 existing.code(),
                 existing.version(),
                 existing.name(),
-                existing.operationSelector(),
+                existing.operationTypes(),
                 existing.direction(),
+                existing.measure(),
+                existing.limitTargetType(),
+                existing.limitValue(),
+                existing.errorMessageTemplate(),
                 existing.attributeSelector(),
-                existing.targetType(),
-                existing.metric(),
-                existing.period(),
-                existing.currency(),
                 RuleStatus.ACTIVE,
                 existing.createdAt(),
                 now,
@@ -188,13 +181,13 @@ public class LimitRuleService {
                 existing.code(),
                 existing.version(),
                 existing.name(),
-                existing.operationSelector(),
+                existing.operationTypes(),
                 existing.direction(),
+                existing.measure(),
+                existing.limitTargetType(),
+                existing.limitValue(),
+                existing.errorMessageTemplate(),
                 existing.attributeSelector(),
-                existing.targetType(),
-                existing.metric(),
-                existing.period(),
-                existing.currency(),
                 RuleStatus.DISABLED,
                 existing.createdAt(),
                 now,
@@ -216,13 +209,13 @@ public class LimitRuleService {
                 existing.code(),
                 repository.nextVersion(existing.code()),
                 existing.name(),
-                existing.operationSelector(),
+                existing.operationTypes(),
                 existing.direction(),
+                existing.measure(),
+                existing.limitTargetType(),
+                existing.limitValue(),
+                existing.errorMessageTemplate(),
                 existing.attributeSelector(),
-                existing.targetType(),
-                existing.metric(),
-                existing.period(),
-                existing.currency(),
                 RuleStatus.DRAFT,
                 now,
                 now,
@@ -231,88 +224,50 @@ public class LimitRuleService {
         ));
     }
 
-    private RuleSelector<OperationSelectorType> validateOperationSelector(RuleSelector<OperationSelectorType> selector) {
-        RuleSelector<OperationSelectorType> normalized = requireSelector(selector, "operationSelector");
-        return switch (normalized.type()) {
-            case ANY -> {
-                requireNoSelectorValue(normalized, "operationSelector");
-                yield new RuleSelector<>(OperationSelectorType.ANY, null);
+    private Set<String> validateOperationTypes(Set<String> operationTypes) {
+        if (operationTypes == null || operationTypes.isEmpty()) {
+            throw problem("VALIDATION_ERROR", "operationTypes must not be empty");
+        }
+        Set<String> normalized = new LinkedHashSet<>();
+        for (String code : operationTypes) {
+            String value = requireText(code, "operationTypes");
+            OperationType type = repository.findOperationTypeByCode(value)
+                    .orElseThrow(() -> problem("RULE_SELECTOR_INVALID", "Operation type is not available"));
+            if (!type.enabled()) {
+                throw problem("OPERATION_TYPE_DISABLED", "Operation type is disabled");
             }
-            case FAMILY -> {
-                String value = requireText(normalized.value(), "operationSelector.value");
-                if (!repository.operationFamilyExists(value)) {
-                    throw problem("RULE_SELECTOR_INVALID", "Operation family is not available");
-                }
-                yield new RuleSelector<>(OperationSelectorType.FAMILY, value);
-            }
-            case TYPE -> {
-                String value = requireText(normalized.value(), "operationSelector.value");
-                OperationType type = repository.findOperationTypeByCode(value)
-                        .orElseThrow(() -> problem("RULE_SELECTOR_INVALID", "Operation type is not available"));
-                if (!type.enabled()) {
-                    throw problem("OPERATION_TYPE_DISABLED", "Operation type is disabled");
-                }
-                yield new RuleSelector<>(OperationSelectorType.TYPE, type.code());
-            }
-        };
+            normalized.add(type.code());
+        }
+        return normalized;
+    }
+
+    private Measure requireMeasure(Measure measure) {
+        if (measure == null) {
+            throw problem("VALIDATION_ERROR", "measure must not be null");
+        }
+        requireEnum(measure.metric(), "measure.metric");
+        return measure;
     }
 
     private RuleSelector<AttributeSelectorType> validateAttributeSelector(RuleSelector<AttributeSelectorType> selector) {
-        RuleSelector<AttributeSelectorType> normalized = requireSelector(selector, "attributeSelector");
-        if (normalized.type() == AttributeSelectorType.NONE) {
-            requireNoSelectorValue(normalized, "attributeSelector");
+        if (selector == null || selector.type() == null) {
             return new RuleSelector<>(AttributeSelectorType.NONE, null);
         }
-        String value = requireText(normalized.value(), "attributeSelector.value");
-        if (!repository.attributeValueExists(normalized.type(), value)) {
+        if (selector.type() == AttributeSelectorType.NONE) {
+            requireNoSelectorValue(selector, "attributeSelector");
+            return new RuleSelector<>(AttributeSelectorType.NONE, null);
+        }
+        String value = requireText(selector.value(), "attributeSelector.value");
+        if (!repository.attributeValueExists(selector.type(), value)) {
             throw problem("RULE_SELECTOR_INVALID", "Attribute selector value is not available");
         }
-        return new RuleSelector<>(normalized.type(), value);
-    }
-
-    private <T extends Enum<T>> RuleSelector<T> requireSelector(RuleSelector<T> selector, String field) {
-        if (selector == null || selector.type() == null) {
-            throw problem("VALIDATION_ERROR", field + ".type must not be null");
-        }
-        return selector;
+        return new RuleSelector<>(selector.type(), value);
     }
 
     private <T extends Enum<T>> void requireNoSelectorValue(RuleSelector<T> selector, String field) {
         if (selector.value() != null && !selector.value().isBlank()) {
             throw problem("VALIDATION_ERROR", field + ".value must be null");
         }
-    }
-
-    private String normalizePatchCurrency(LimitRule existing, RuleMetric metric, String currency) {
-        if (currency != null) {
-            return normalizeCurrency(metric, currency, true);
-        }
-        if (metric == RuleMetric.COUNT) {
-            return null;
-        }
-        return existing.metric() == RuleMetric.AMOUNT && existing.currency() != null
-                ? existing.currency()
-                : DEFAULT_CURRENCY;
-    }
-
-    private String normalizeCurrency(RuleMetric metric, String currency, boolean required) {
-        if (metric == RuleMetric.COUNT) {
-            if (currency != null && !currency.isBlank()) {
-                throw problem("VALIDATION_ERROR", "currency must be null for COUNT rules");
-            }
-            return null;
-        }
-        if (currency == null || currency.isBlank()) {
-            if (required) {
-                throw problem("VALIDATION_ERROR", "currency must not be blank for AMOUNT rules");
-            }
-            return DEFAULT_CURRENCY;
-        }
-        String normalized = currency.trim().toUpperCase();
-        if (!DEFAULT_CURRENCY.equals(normalized)) {
-            throw problem("VALIDATION_ERROR", "Only RUB currency is supported");
-        }
-        return normalized;
     }
 
     private void requireDraft(LimitRule rule) {

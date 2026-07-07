@@ -2,6 +2,7 @@ package ru.copperside.paylimits.management.limitrule.adapter.in.web;
 
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.NotEmpty;
 import jakarta.validation.constraints.NotNull;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -17,18 +18,21 @@ import ru.copperside.paylimits.management.limitrule.application.CreateOperationT
 import ru.copperside.paylimits.management.limitrule.application.LimitRuleService;
 import ru.copperside.paylimits.management.limitrule.application.PatchLimitRuleCommand;
 import ru.copperside.paylimits.management.limitrule.application.PatchOperationTypeCommand;
+import ru.copperside.paylimits.management.limitrule.domain.AggregationScope;
 import ru.copperside.paylimits.management.limitrule.domain.AttributeSelectorType;
 import ru.copperside.paylimits.management.limitrule.domain.CounterpartyType;
 import ru.copperside.paylimits.management.limitrule.domain.LimitTargetType;
+import ru.copperside.paylimits.management.limitrule.domain.Measure;
 import ru.copperside.paylimits.management.limitrule.domain.OperationDirection;
-import ru.copperside.paylimits.management.limitrule.domain.OperationSelectorType;
 import ru.copperside.paylimits.management.limitrule.domain.RuleDictionaries;
 import ru.copperside.paylimits.management.limitrule.domain.RuleMetric;
 import ru.copperside.paylimits.management.limitrule.domain.RulePeriod;
 import ru.copperside.paylimits.management.limitrule.domain.RuleSelector;
 
+import java.math.BigDecimal;
 import java.time.Clock;
 import java.util.List;
+import java.util.Set;
 import java.util.UUID;
 
 @RestController
@@ -106,13 +110,15 @@ public class LimitRuleController {
         var rule = service().createRule(new CreateLimitRuleCommand(
                 request.code(),
                 request.name(),
-                request.operationSelector().toDomain(),
+                request.operationTypes(),
                 request.direction(),
-                request.attributeSelector().toDomain(),
-                request.targetType(),
-                request.metric(),
-                request.period(),
-                request.currency()
+                request.measure().toDomain(),
+                request.limitTargetType(),
+                request.limitValue(),
+                request.errorMessageTemplate(),
+                request.attributeSelector() == null
+                        ? new RuleSelector<>(AttributeSelectorType.NONE, null)
+                        : request.attributeSelector().toDomain()
         ));
         return ApiResponse.success(LimitRuleResponse.from(rule), clock);
     }
@@ -124,13 +130,13 @@ public class LimitRuleController {
     ) {
         var rule = service().patchRule(ruleId, new PatchLimitRuleCommand(
                 request.name(),
-                request.operationSelector() == null ? null : request.operationSelector().toDomain(),
+                request.operationTypes(),
                 request.direction(),
-                request.attributeSelector() == null ? null : request.attributeSelector().toDomain(),
-                request.targetType(),
-                request.metric(),
-                request.period(),
-                request.currency()
+                request.measure() == null ? null : request.measure().toDomain(),
+                request.limitTargetType(),
+                request.limitValue(),
+                request.errorMessageTemplate(),
+                request.attributeSelector() == null ? null : request.attributeSelector().toDomain()
         ));
         return ApiResponse.success(LimitRuleResponse.from(rule), clock);
     }
@@ -177,31 +183,37 @@ public class LimitRuleController {
     public record CreateRuleRequest(
             @NotBlank String code,
             @NotBlank String name,
-            @Valid @NotNull OperationSelectorRequest operationSelector,
+            @NotEmpty Set<String> operationTypes,
             @NotNull OperationDirection direction,
-            @Valid @NotNull AttributeSelectorRequest attributeSelector,
-            @NotNull LimitTargetType targetType,
-            @NotNull RuleMetric metric,
-            @NotNull RulePeriod period,
-            String currency
+            @Valid @NotNull MeasureRequest measure,
+            LimitTargetType limitTargetType,
+            BigDecimal limitValue,
+            @NotBlank String errorMessageTemplate,
+            @Valid AttributeSelectorRequest attributeSelector
     ) {
     }
 
     public record PatchRuleRequest(
             String name,
-            @Valid OperationSelectorRequest operationSelector,
+            Set<String> operationTypes,
             OperationDirection direction,
-            @Valid AttributeSelectorRequest attributeSelector,
-            LimitTargetType targetType,
-            RuleMetric metric,
-            RulePeriod period,
-            String currency
+            @Valid MeasureRequest measure,
+            LimitTargetType limitTargetType,
+            BigDecimal limitValue,
+            String errorMessageTemplate,
+            @Valid AttributeSelectorRequest attributeSelector
     ) {
     }
 
-    public record OperationSelectorRequest(@NotNull OperationSelectorType type, String value) {
-        RuleSelector<OperationSelectorType> toDomain() {
-            return new RuleSelector<>(type, value);
+    public record MeasureRequest(
+            @NotNull RuleMetric metric,
+            RulePeriod period,
+            AggregationScope aggregationScope,
+            String currency,
+            Integer intervalMinutes
+    ) {
+        Measure toDomain() {
+            return new Measure(metric, period, aggregationScope, currency, intervalMinutes);
         }
     }
 

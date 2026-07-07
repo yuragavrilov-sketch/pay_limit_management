@@ -10,8 +10,8 @@ import ru.copperside.paylimits.management.limitrule.domain.CounterpartyType;
 import ru.copperside.paylimits.management.limitrule.domain.DictionaryItem;
 import ru.copperside.paylimits.management.limitrule.domain.LimitRule;
 import ru.copperside.paylimits.management.limitrule.domain.LimitTargetType;
+import ru.copperside.paylimits.management.limitrule.domain.Measure;
 import ru.copperside.paylimits.management.limitrule.domain.OperationDirection;
-import ru.copperside.paylimits.management.limitrule.domain.OperationSelectorType;
 import ru.copperside.paylimits.management.limitrule.domain.OperationType;
 import ru.copperside.paylimits.management.limitrule.domain.RuleDictionaries;
 import ru.copperside.paylimits.management.limitrule.domain.RuleManifestDiagnosticsDetails;
@@ -23,6 +23,7 @@ import ru.copperside.paylimits.management.limitrule.domain.RulePeriod;
 import ru.copperside.paylimits.management.limitrule.domain.RuleSelector;
 import ru.copperside.paylimits.management.limitrule.domain.RuleStatus;
 
+import java.math.BigDecimal;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
@@ -30,6 +31,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -51,8 +53,8 @@ class RuleManifestCompilerTest {
 
     @Test
     void compilesActiveRulesIntoDeterministicManifest() {
-        LimitRule second = repository.addActiveRule("RULE_Z", familySelector("CARD"), OperationDirection.IN, noneSelector());
-        LimitRule first = repository.addActiveRule("RULE_A", typeSelector("SBP_C2B"), OperationDirection.IN, noneSelector());
+        LimitRule second = repository.addActiveRule("RULE_Z", Set.of("ECOM"), OperationDirection.IN, noneSelector());
+        LimitRule first = repository.addActiveRule("RULE_A", Set.of("SBP_C2B"), OperationDirection.IN, noneSelector());
 
         RuleManifest manifest = compiler.compile();
 
@@ -63,7 +65,7 @@ class RuleManifestCompilerTest {
         assertThat(manifest.createdAt()).isEqualTo(NOW);
         assertThat(manifest.ruleCount()).isEqualTo(2);
         assertThat(manifest.rules()).extracting(CompiledRule::ruleId).containsExactly(first.id(), second.id());
-        assertThat(manifest.rules().getFirst().matcher().operation().type()).isEqualTo(OperationSelectorType.TYPE);
+        assertThat(manifest.rules().getFirst().matcher().operationTypes()).containsExactly("SBP_C2B");
         assertThat(manifest.diagnostics()).isEmpty();
         assertThat(manifest.payload()).isNotNull();
         assertThat(manifest.payload().version()).isEqualTo(manifest.version());
@@ -77,7 +79,7 @@ class RuleManifestCompilerTest {
 
     @Test
     void compilesUsingRepositoryOwnedSnapshot() {
-        LimitRule rule = repository.addActiveRule("RULE_A", typeSelector("SBP_C2B"), OperationDirection.IN, noneSelector());
+        LimitRule rule = repository.addActiveRule("RULE_A", Set.of("SBP_C2B"), OperationDirection.IN, noneSelector());
         repository.failDirectSnapshotReads = true;
 
         RuleManifest manifest = compiler.compile();
@@ -89,7 +91,7 @@ class RuleManifestCompilerTest {
 
     @Test
     void keepsChecksumStableForSameVersionClockAndRules() {
-        repository.addActiveRule("RULE_A", typeSelector("SBP_C2B"), OperationDirection.IN, noneSelector());
+        repository.addActiveRule("RULE_A", Set.of("SBP_C2B"), OperationDirection.IN, noneSelector());
 
         RuleManifest first = compiler.compile();
         repository.saved.clear();
@@ -100,9 +102,24 @@ class RuleManifestCompilerTest {
     }
 
     @Test
+    void keepsChecksumStableWhenOperationTypeSetIsReordered() {
+        UUID ruleId = UUID.randomUUID();
+        repository.activeRules.add(activeRule(ruleId, "RULE_A", orderedSet("SBP_C2B", "SBP_B2B_IN")));
+        RuleManifest first = compiler.compile();
+
+        repository.clearRules();
+        repository.saved.clear();
+        repository.nextVersion = 1;
+        repository.activeRules.add(activeRule(ruleId, "RULE_A", orderedSet("SBP_B2B_IN", "SBP_C2B")));
+        RuleManifest second = compiler.compile();
+
+        assertThat(second.checksum()).isEqualTo(first.checksum());
+    }
+
+    @Test
     void rejectsDuplicateMatcherAndMeasure() {
-        repository.addActiveRule("RULE_A", familySelector("SBP"), OperationDirection.IN, noneSelector());
-        repository.addActiveRule("RULE_B", familySelector("SBP"), OperationDirection.IN, noneSelector());
+        repository.addActiveRule("RULE_A", Set.of("SBP_C2B"), OperationDirection.IN, noneSelector());
+        repository.addActiveRule("RULE_B", Set.of("SBP_C2B"), OperationDirection.IN, noneSelector());
 
         assertThatThrownBy(() -> compiler.compile())
                 .isInstanceOf(RuleManifestProblemException.class)
@@ -120,9 +137,9 @@ class RuleManifestCompilerTest {
     }
 
     @Test
-    void rejectsAmbiguousAnyAndFamilyOperationScopes() {
-        repository.addActiveRule("RULE_ANY", anySelector(), OperationDirection.IN, noneSelector());
-        repository.addActiveRule("RULE_FAMILY", familySelector("SBP"), OperationDirection.IN, noneSelector());
+    void rejectsOverlappingOperationTypeSetsForSameMatcherAndMeasure() {
+        repository.addActiveRule("RULE_WIDE", orderedSet("SBP_C2B", "SBP_B2B_IN"), OperationDirection.IN, noneSelector());
+        repository.addActiveRule("RULE_NARROW", Set.of("SBP_C2B"), OperationDirection.IN, noneSelector());
 
         assertThatThrownBy(() -> compiler.compile())
                 .isInstanceOf(RuleManifestProblemException.class)
@@ -133,21 +150,20 @@ class RuleManifestCompilerTest {
     }
 
     @Test
-    void rejectsFamilyAndTypeOperationScopesFromSameFamily() {
-        repository.addActiveRule("RULE_FAMILY", familySelector("SBP"), OperationDirection.IN, noneSelector());
-        repository.addActiveRule("RULE_TYPE", typeSelector("SBP_C2B"), OperationDirection.IN, noneSelector());
+    void allowsDisjointOperationTypeSetsForSameMatcherAndMeasure() {
+        repository.addActiveRule("RULE_A", Set.of("SBP_C2B"), OperationDirection.IN, noneSelector());
+        repository.addActiveRule("RULE_B", Set.of("SBP_B2B_IN"), OperationDirection.IN, noneSelector());
 
-        assertThatThrownBy(() -> compiler.compile())
-                .isInstanceOf(RuleManifestProblemException.class)
-                .satisfies(error -> assertThat(((RuleManifestProblemException) error).diagnostics())
-                        .extracting(diagnostic -> diagnostic.code())
-                        .contains("MANIFEST_OVERLAPPING_OPERATION_SCOPE"));
+        RuleManifest manifest = compiler.compile();
+
+        assertThat(manifest.ruleCount()).isEqualTo(2);
+        assertThat(repository.saved).containsExactly(manifest);
     }
 
     @Test
     void rejectsDisabledDictionaryValue() {
         repository.paymentSystemsEnabled = false;
-        repository.addActiveRule("RULE_MIR", familySelector("SBP"), OperationDirection.IN,
+        repository.addActiveRule("RULE_MIR", Set.of("SBP_C2B"), OperationDirection.IN,
                 new RuleSelector<>(AttributeSelectorType.PAYMENT_SYSTEM, "MIR"));
 
         assertThatThrownBy(() -> compiler.compile())
@@ -158,8 +174,8 @@ class RuleManifestCompilerTest {
     }
 
     @Test
-    void rejectsTypeDirectionIncompatibleWithOperationType() {
-        repository.addActiveRule("RULE_BAD_DIRECTION", typeSelector("SBP_C2B"), OperationDirection.OUT, noneSelector());
+    void rejectsDirectionIncompatibleWithOperationType() {
+        repository.addActiveRule("RULE_BAD_DIRECTION", Set.of("SBP_C2B"), OperationDirection.OUT, noneSelector());
 
         assertThatThrownBy(() -> compiler.compile())
                 .isInstanceOf(RuleManifestProblemException.class)
@@ -169,33 +185,22 @@ class RuleManifestCompilerTest {
     }
 
     @Test
-    void allowsSpecificRuleDirectionWhenOperationTypeSupportsAllDirections() {
-        repository.addActiveRule("RULE_C2C_OUT", typeSelector("SBP_C2C"), OperationDirection.OUT, noneSelector());
-
-        RuleManifest manifest = compiler.compile();
-
-        assertThat(manifest.ruleCount()).isEqualTo(1);
-        assertThat(repository.saved).containsExactly(manifest);
-    }
-
-    @Test
-    void rejectsAllRuleDirectionForSpecificOperationTypeDirection() {
-        repository.addActiveRule("RULE_BAD_ALL", typeSelector("SBP_C2B"), OperationDirection.ALL, noneSelector());
+    void rejectsUnknownOperationType() {
+        repository.addActiveRule("RULE_UNKNOWN", Set.of("UNKNOWN_TYPE"), OperationDirection.IN, noneSelector());
 
         assertThatThrownBy(() -> compiler.compile())
                 .isInstanceOf(RuleManifestProblemException.class)
                 .hasMessageContaining("RULE_MANIFEST_CONFLICT")
                 .satisfies(error -> assertThat(((RuleManifestProblemException) error).diagnostics())
                         .extracting(diagnostic -> diagnostic.code())
-                        .contains("MANIFEST_DIRECTION_CONFLICT"));
+                        .contains("MANIFEST_DICTIONARY_VALUE_MISSING"));
 
         assertThat(repository.saved).isEmpty();
     }
 
     @Test
-    void rejectsInvalidOperationSelectorsWithoutRawNullPointerException() {
-        repository.addActiveRule("RULE_BAD_SELECTOR_A", null, OperationDirection.IN, noneSelector());
-        repository.addActiveRule("RULE_BAD_SELECTOR_B", new RuleSelector<>(null, null), OperationDirection.IN, noneSelector());
+    void rejectsRuleWithoutOperationTypes() {
+        repository.addActiveRule("RULE_EMPTY", Set.of(), OperationDirection.IN, noneSelector());
 
         assertThatThrownBy(() -> compiler.compile())
                 .isInstanceOf(RuleManifestProblemException.class)
@@ -209,7 +214,7 @@ class RuleManifestCompilerTest {
 
     @Test
     void delegatesLatestManifestLookup() {
-        repository.addActiveRule("RULE_A", typeSelector("SBP_C2B"), OperationDirection.IN, noneSelector());
+        repository.addActiveRule("RULE_A", Set.of("SBP_C2B"), OperationDirection.IN, noneSelector());
         RuleManifest manifest = compiler.compile();
 
         assertThat(compiler.getLatest()).isEqualTo(manifest);
@@ -222,16 +227,29 @@ class RuleManifestCompilerTest {
                 .hasMessageContaining("RULE_MANIFEST_NOT_FOUND");
     }
 
-    private static RuleSelector<OperationSelectorType> anySelector() {
-        return new RuleSelector<>(OperationSelectorType.ANY, null);
+    private static Set<String> orderedSet(String... codes) {
+        return new java.util.LinkedHashSet<>(Arrays.asList(codes));
     }
 
-    private static RuleSelector<OperationSelectorType> familySelector(String value) {
-        return new RuleSelector<>(OperationSelectorType.FAMILY, value);
-    }
-
-    private static RuleSelector<OperationSelectorType> typeSelector(String value) {
-        return new RuleSelector<>(OperationSelectorType.TYPE, value);
+    private static LimitRule activeRule(UUID id, String code, Set<String> operationTypes) {
+        return new LimitRule(
+                id,
+                code,
+                1,
+                code,
+                operationTypes,
+                OperationDirection.IN,
+                new Measure(RuleMetric.AMOUNT, RulePeriod.DAY, AggregationScope.OWNER, "RUB", null),
+                LimitTargetType.PHONE,
+                new BigDecimal("1000.00"),
+                "template",
+                new RuleSelector<>(AttributeSelectorType.NONE, null),
+                RuleStatus.ACTIVE,
+                Instant.EPOCH,
+                Instant.EPOCH,
+                Instant.EPOCH,
+                null
+        );
     }
 
     private static RuleSelector<AttributeSelectorType> noneSelector() {
@@ -248,7 +266,7 @@ class RuleManifestCompilerTest {
 
         LimitRule addActiveRule(
                 String code,
-                RuleSelector<OperationSelectorType> operationSelector,
+                Set<String> operationTypes,
                 OperationDirection direction,
                 RuleSelector<AttributeSelectorType> attributeSelector
         ) {
@@ -257,13 +275,13 @@ class RuleManifestCompilerTest {
                     code,
                     1,
                     code,
-                    operationSelector,
+                    operationTypes,
                     direction,
-                    attributeSelector,
+                    new Measure(RuleMetric.AMOUNT, RulePeriod.DAY, AggregationScope.OWNER, "RUB", null),
                     LimitTargetType.PHONE,
-                    RuleMetric.AMOUNT,
-                    RulePeriod.DAY,
-                    "RUB",
+                    new BigDecimal("1000.00"),
+                    "template",
+                    attributeSelector,
                     RuleStatus.ACTIVE,
                     Instant.EPOCH,
                     Instant.EPOCH,
@@ -272,6 +290,10 @@ class RuleManifestCompilerTest {
             );
             activeRules.add(rule);
             return rule;
+        }
+
+        void clearRules() {
+            activeRules.clear();
         }
 
         @Override
@@ -292,7 +314,7 @@ class RuleManifestCompilerTest {
                     List.of(
                             operationType("SBP_C2B", "SBP", OperationDirection.IN, true),
                             operationType("SBP_B2C", "SBP", OperationDirection.OUT, true),
-                            operationType("SBP_C2C", "SBP", OperationDirection.ALL, true),
+                            operationType("SBP_B2B_IN", "SBP", OperationDirection.IN, true),
                             operationType("ECOM", "CARD", OperationDirection.IN, true)
                     ),
                     List.of(item("MIR", paymentSystemsEnabled)),
@@ -302,7 +324,6 @@ class RuleManifestCompilerTest {
                     List.of(item("DEBIT", true)),
                     List.of(item("GOLD", true)),
                     Arrays.asList(OperationDirection.values()),
-                    Arrays.asList(OperationSelectorType.values()),
                     Arrays.asList(AttributeSelectorType.values()),
                     Arrays.asList(LimitTargetType.values()),
                     Arrays.asList(RuleMetric.values()),

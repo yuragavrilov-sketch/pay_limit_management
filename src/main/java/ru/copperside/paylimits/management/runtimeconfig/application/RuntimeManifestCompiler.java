@@ -2,9 +2,6 @@ package ru.copperside.paylimits.management.runtimeconfig.application;
 
 import ru.copperside.paylimits.management.limitrule.domain.LimitRule;
 import ru.copperside.paylimits.management.limitrule.domain.ManifestDiagnostic;
-import ru.copperside.paylimits.management.limitrule.domain.OperationSelectorType;
-import ru.copperside.paylimits.management.limitrule.domain.OperationType;
-import ru.copperside.paylimits.management.limitrule.domain.RuleSelector;
 import ru.copperside.paylimits.management.runtimeconfig.application.port.out.RuntimeManifestRepository;
 import ru.copperside.paylimits.management.runtimeconfig.domain.RuntimeCompiledAssignment;
 import ru.copperside.paylimits.management.runtimeconfig.domain.RuntimeCompiledRule;
@@ -115,35 +112,30 @@ public class RuntimeManifestCompiler {
         return repository.saveCompiledManifest(version -> buildRollbackManifest(source, version, now, canonicalEffectiveFrom));
     }
 
-    public static RuntimeCompiledRule compileRule(LimitRule rule, List<OperationType> operationTypes) {
+    public static RuntimeCompiledRule compileRule(LimitRule rule) {
         return new RuntimeCompiledRule(
                 rule.id(),
                 rule.code(),
                 rule.version(),
                 new RuntimeCompiledRule.Matcher(
-                        rule.operationSelector(),
-                        rule.operationSelector().type() == OperationSelectorType.ANY,
-                        operationTypeCodes(rule.operationSelector(), operationTypes),
+                        rule.operationTypes().stream().sorted().toList(),
                         rule.direction(),
                         rule.attributeSelector(),
-                        rule.targetType()
+                        rule.limitTargetType()
                 ),
-                new RuntimeCompiledRule.Measure(
-                        rule.metric(),
-                        rule.period(),
-                        rule.currency()
-                )
+                rule.measure(),
+                rule.limitValue(),
+                rule.errorMessageTemplate()
         );
     }
 
     private RuntimeManifest buildManifest(int version, Instant createdAt, Instant effectiveFrom) {
-        List<OperationType> operationTypes = repository.listOperationTypesForCompilation();
         List<RuntimeCompiledRule> rules = repository.listActiveRulesForCompilation().stream()
                 .filter(LimitRule::active)
                 .sorted(Comparator.comparing(LimitRule::code)
                         .thenComparingInt(LimitRule::version)
                         .thenComparing(rule -> rule.id().toString()))
-                .map(rule -> compileRule(rule, operationTypes))
+                .map(RuntimeManifestCompiler::compileRule)
                 .toList();
         List<RuntimeCompiledAssignment> assignments = repository.listEnabledAssignmentsForCompilation().stream()
                 .sorted(Comparator.comparing(RuntimeCompiledAssignment::ruleCode)
@@ -246,23 +238,6 @@ public class RuntimeManifestCompiler {
                 descriptor.effectiveFrom(),
                 lifecycleStatus
         );
-    }
-
-    private static List<String> operationTypeCodes(
-            RuleSelector<OperationSelectorType> selector,
-            List<OperationType> operationTypes
-    ) {
-        return switch (selector.type()) {
-            case ANY -> List.of();
-            case TYPE -> List.of(selector.value());
-            case FAMILY -> operationTypes.stream()
-                    .filter(OperationType::enabled)
-                    .filter(type -> selector.value().equals(type.familyCode()))
-                    .sorted(Comparator.comparingInt(OperationType::sortOrder)
-                            .thenComparing(OperationType::code))
-                    .map(OperationType::code)
-                    .toList();
-        };
     }
 
     private void validateEffectiveFrom(Instant effectiveFrom, Instant now) {

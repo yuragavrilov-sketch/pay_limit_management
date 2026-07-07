@@ -11,11 +11,12 @@ import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 import ru.copperside.paylimits.management.limitassignment.domain.AssignmentOwnerType;
 import ru.copperside.paylimits.management.limitassignment.domain.LimitMode;
+import ru.copperside.paylimits.management.limitrule.domain.AggregationScope;
 import ru.copperside.paylimits.management.limitrule.domain.AttributeSelectorType;
 import ru.copperside.paylimits.management.limitrule.domain.LimitTargetType;
 import ru.copperside.paylimits.management.limitrule.domain.ManifestDiagnostic;
+import ru.copperside.paylimits.management.limitrule.domain.Measure;
 import ru.copperside.paylimits.management.limitrule.domain.OperationDirection;
-import ru.copperside.paylimits.management.limitrule.domain.OperationSelectorType;
 import ru.copperside.paylimits.management.limitrule.domain.RuleMetric;
 import ru.copperside.paylimits.management.limitrule.domain.RulePeriod;
 import ru.copperside.paylimits.management.limitrule.domain.RuleSelector;
@@ -28,6 +29,7 @@ import ru.copperside.paylimits.management.runtimeconfig.domain.RuntimeManifestPa
 import ru.copperside.paylimits.management.runtimeconfig.domain.RuntimeManifestStatus;
 import ru.copperside.paylimits.management.runtimeconfig.domain.RuntimeMerchantGroupMembership;
 
+import java.math.BigDecimal;
 import java.sql.Timestamp;
 import java.time.Instant;
 import java.util.List;
@@ -195,14 +197,14 @@ class PostgresRuntimeManifestRepositoryIntegrationTest {
                 ruleCode,
                 1,
                 new RuntimeCompiledRule.Matcher(
-                        new RuleSelector<>(OperationSelectorType.TYPE, "SBP_C2B"),
-                        false,
                         List.of("SBP_C2B"),
                         OperationDirection.IN,
                         new RuleSelector<>(AttributeSelectorType.NONE, null),
                         LimitTargetType.PHONE
                 ),
-                new RuntimeCompiledRule.Measure(RuleMetric.AMOUNT, RulePeriod.DAY, "RUB")
+                new Measure(RuleMetric.AMOUNT, RulePeriod.DAY, AggregationScope.OWNER, "RUB", null),
+                new BigDecimal("1000.00"),
+                "template"
         );
     }
 
@@ -216,13 +218,21 @@ class PostgresRuntimeManifestRepositoryIntegrationTest {
 
         jdbcTemplate.update("""
                 insert into limit_management.limit_rules
-                    (id, code, version, name, operation_selector_type, operation_selector_value, direction,
-                     attribute_selector_type, attribute_selector_value, target_type, metric, period, currency,
+                    (id, code, version, name, direction,
+                     attribute_selector_type, attribute_selector_value, target_type,
+                     metric, period, aggregation_scope, currency, interval_minutes,
+                     limit_value, error_message_template,
                      status, created_at, updated_at, activated_at, disabled_at)
-                values (?, ?, 1, ?, 'TYPE', 'SBP_C2B', 'IN',
-                        'NONE', null, 'PHONE', 'AMOUNT', 'DAY', 'RUB',
+                values (?, ?, 1, ?, 'IN',
+                        'NONE', null, 'PHONE',
+                        'AMOUNT', 'DAY', 'OWNER', 'RUB', null,
+                        1000.00, 'template',
                         'ACTIVE', now(), now(), now(), null)
                 """, ruleId, ruleCode, ruleCode);
+        jdbcTemplate.update("""
+                insert into limit_management.limit_rule_operation_type (rule_id, operation_type_code)
+                values (?, 'SBP_C2B')
+                """, ruleId);
         jdbcTemplate.update("""
                 insert into limit_management.limit_assignments
                     (id, rule_id, owner_type, owner_id, limit_mode, limit_value,

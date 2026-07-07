@@ -115,13 +115,21 @@ class PostgresLimitAssignmentRepositoryIntegrationTest {
         UUID ruleId = UUID.randomUUID();
         jdbcTemplate.update("""
                 insert into limit_management.limit_rules
-                    (id, code, version, name, operation_selector_type, operation_selector_value, direction,
-                     attribute_selector_type, attribute_selector_value, target_type, metric, period, currency,
+                    (id, code, version, name, direction,
+                     attribute_selector_type, attribute_selector_value, target_type,
+                     metric, period, aggregation_scope, currency, interval_minutes,
+                     limit_value, error_message_template,
                      status, created_at, updated_at, activated_at, disabled_at)
-                values (?, ?, 1, ?, 'TYPE', 'SBP_C2B', 'IN',
-                        'NONE', null, 'PHONE', 'AMOUNT', 'DAY', 'RUB',
+                values (?, ?, 1, ?, 'IN',
+                        'NONE', null, 'PHONE',
+                        'AMOUNT', 'DAY', 'OWNER', 'RUB', null,
+                        1000.00, 'template',
                         'ACTIVE', now(), now(), now(), null)
                 """, ruleId, code, code);
+        jdbcTemplate.update("""
+                insert into limit_management.limit_rule_operation_type (rule_id, operation_type_code)
+                values (?, 'SBP_C2B')
+                """, ruleId);
         return ruleId;
     }
 

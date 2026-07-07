@@ -1,6 +1,8 @@
 package ru.copperside.paylimits.management.limitrule.domain;
 
+import java.math.BigDecimal;
 import java.time.Instant;
+import java.util.Set;
 import java.util.UUID;
 
 public record LimitRule(
@@ -8,19 +10,23 @@ public record LimitRule(
         String code,
         int version,
         String name,
-        RuleSelector<OperationSelectorType> operationSelector,
+        Set<String> operationTypes,
         OperationDirection direction,
+        Measure measure,
+        LimitTargetType limitTargetType,
+        BigDecimal limitValue,
+        String errorMessageTemplate,
         RuleSelector<AttributeSelectorType> attributeSelector,
-        LimitTargetType targetType,
-        RuleMetric metric,
-        RulePeriod period,
-        String currency,
         RuleStatus status,
         Instant createdAt,
         Instant updatedAt,
         Instant activatedAt,
         Instant disabledAt
 ) {
+    public LimitRule {
+        operationTypes = operationTypes == null ? Set.of() : Set.copyOf(operationTypes);
+    }
+
     public boolean active() {
         return status == RuleStatus.ACTIVE;
     }

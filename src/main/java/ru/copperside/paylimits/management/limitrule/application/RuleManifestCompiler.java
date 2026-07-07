@@ -8,8 +8,8 @@ import ru.copperside.paylimits.management.limitrule.domain.LimitRule;
 import ru.copperside.paylimits.management.limitrule.domain.LimitTargetType;
 import ru.copperside.paylimits.management.limitrule.domain.ManifestDiagnostic;
 import ru.copperside.paylimits.management.limitrule.domain.ManifestDiagnosticSeverity;
+import ru.copperside.paylimits.management.limitrule.domain.Measure;
 import ru.copperside.paylimits.management.limitrule.domain.OperationDirection;
-import ru.copperside.paylimits.management.limitrule.domain.OperationSelectorType;
 import ru.copperside.paylimits.management.limitrule.domain.OperationType;
 import ru.copperside.paylimits.management.limitrule.domain.RuleDictionaries;
 import ru.copperside.paylimits.management.limitrule.domain.RuleManifest;
@@ -64,10 +64,10 @@ public class RuleManifestCompiler {
                     .toList();
 
             DictionaryIndex dictionaryIndex = new DictionaryIndex(dictionaries);
-            validateRules(rules, compiledRules, dictionaryIndex, diagnostics);
+            validateRules(rules, dictionaryIndex, diagnostics);
             if (diagnostics.isEmpty()) {
                 detectDuplicateRules(compiledRules, diagnostics);
-                detectOperationScopeOverlaps(compiledRules, dictionaryIndex.operationTypesByCode(), diagnostics);
+                detectOperationScopeOverlaps(compiledRules, diagnostics);
             }
 
             if (!diagnostics.isEmpty()) {
@@ -101,29 +101,26 @@ public class RuleManifestCompiler {
                 rule.code(),
                 rule.version(),
                 new CompiledRule.Matcher(
-                        rule.operationSelector(),
+                        rule.operationTypes().stream().sorted().toList(),
                         rule.direction(),
                         rule.attributeSelector(),
-                        rule.targetType()
+                        rule.limitTargetType()
                 ),
-                new CompiledRule.Measure(
-                        rule.metric(),
-                        rule.period(),
-                        rule.currency()
-                )
+                rule.measure(),
+                rule.limitValue(),
+                rule.errorMessageTemplate()
         );
     }
 
     private void validateRules(
             List<LimitRule> rules,
-            List<CompiledRule> compiledRules,
             DictionaryIndex dictionaryIndex,
             List<ManifestDiagnostic> diagnostics
     ) {
         for (int i = 0; i < rules.size(); i++) {
             LimitRule rule = rules.get(i);
             validateStructure(rule, i, diagnostics);
-            validateOperationSelector(rule, i, dictionaryIndex, diagnostics);
+            validateOperationTypes(rule, i, dictionaryIndex, diagnostics);
             validateAttributeSelector(rule, i, dictionaryIndex, diagnostics);
             validateEnumMembership(rule, i, dictionaryIndex.dictionaries(), diagnostics);
         }
@@ -138,7 +135,16 @@ public class RuleManifestCompiler {
                     "rules[" + index + "].status"
             ));
         }
-        if (rule.metric() == RuleMetric.AMOUNT && !DEFAULT_CURRENCY.equals(rule.currency())) {
+        if (rule.operationTypes().isEmpty()) {
+            diagnostics.add(diagnostic(
+                    "MANIFEST_INVALID_RULE_DEFINITION",
+                    "Active rule must reference at least one operation type",
+                    List.of(rule.id()),
+                    "rules[" + index + "].matcher.operationTypes"
+            ));
+        }
+        Measure measure = rule.measure();
+        if (measure.metric() == RuleMetric.AMOUNT && !DEFAULT_CURRENCY.equals(measure.currency())) {
             diagnostics.add(diagnostic(
                     "MANIFEST_INVALID_RULE_DEFINITION",
                     "AMOUNT rules must use RUB currency",
@@ -146,7 +152,7 @@ public class RuleManifestCompiler {
                     "rules[" + index + "].measure.currency"
             ));
         }
-        if (rule.metric() == RuleMetric.COUNT && rule.currency() != null) {
+        if (measure.metric() == RuleMetric.COUNT && measure.currency() != null) {
             diagnostics.add(diagnostic(
                     "MANIFEST_INVALID_RULE_DEFINITION",
                     "COUNT rules must not define currency",
@@ -154,8 +160,6 @@ public class RuleManifestCompiler {
                     "rules[" + index + "].measure.currency"
             ));
         }
-        validateSelectorShape(rule.id(), rule.operationSelector(), OperationSelectorType.ANY, index,
-                "matcher.operation", diagnostics);
         validateSelectorShape(rule.id(), rule.attributeSelector(), AttributeSelectorType.NONE, index,
                 "matcher.attribute", diagnostics);
     }
@@ -182,40 +186,30 @@ public class RuleManifestCompiler {
         }
     }
 
-    private void validateOperationSelector(
+    private void validateOperationTypes(
             LimitRule rule,
             int index,
             DictionaryIndex dictionaryIndex,
             List<ManifestDiagnostic> diagnostics
     ) {
-        RuleSelector<OperationSelectorType> selector = rule.operationSelector();
-        if (selector == null || selector.type() == null || selector.type() == OperationSelectorType.ANY) {
-            return;
-        }
-
-        if (selector.type() == OperationSelectorType.FAMILY) {
-            DictionaryItem family = dictionaryIndex.operationFamiliesByCode().get(selector.value());
-            validateDictionaryItem(rule.id(), family, "Operation family", index, "matcher.operation", diagnostics);
-            return;
-        }
-
-        OperationType operationType = dictionaryIndex.operationTypesByCode().get(selector.value());
-        if (operationType == null) {
-            diagnostics.add(dictionaryMissing(rule.id(), "Operation type", index, "matcher.operation"));
-            return;
-        }
-        if (!operationType.enabled()) {
-            diagnostics.add(dictionaryDisabled(rule.id(), "Operation type", index, "matcher.operation"));
-        }
-        if (operationType.enabled()
-                && operationType.direction() != OperationDirection.ALL
-                && operationType.direction() != rule.direction()) {
-            diagnostics.add(diagnostic(
-                    "MANIFEST_DIRECTION_CONFLICT",
-                    "Operation type direction is incompatible with rule direction",
-                    List.of(rule.id()),
-                    "rules[" + index + "].matcher.direction"
-            ));
+        for (String code : rule.operationTypes()) {
+            OperationType operationType = dictionaryIndex.operationTypesByCode().get(code);
+            if (operationType == null) {
+                diagnostics.add(dictionaryMissing(rule.id(), "Operation type", index, "matcher.operationTypes"));
+                continue;
+            }
+            if (!operationType.enabled()) {
+                diagnostics.add(dictionaryDisabled(rule.id(), "Operation type", index, "matcher.operationTypes"));
+                continue;
+            }
+            if (operationType.direction() != rule.direction()) {
+                diagnostics.add(diagnostic(
+                        "MANIFEST_DIRECTION_CONFLICT",
+                        "Operation type direction is incompatible with rule direction",
+                        List.of(rule.id()),
+                        "rules[" + index + "].matcher.direction"
+                ));
+            }
         }
     }
 
@@ -254,14 +248,15 @@ public class RuleManifestCompiler {
             RuleDictionaries dictionaries,
             List<ManifestDiagnostic> diagnostics
     ) {
-        if (!dictionaries.directions().contains(rule.direction())
-                || !dictionaries.targetTypes().contains(rule.targetType())
-                || !dictionaries.metrics().contains(rule.metric())
-                || !dictionaries.periods().contains(rule.period())
-                || rule.operationSelector() == null
-                || !dictionaries.operationSelectorTypes().contains(rule.operationSelector().type())
+        Measure measure = rule.measure();
+        boolean invalid = !dictionaries.directions().contains(rule.direction())
+                || (rule.limitTargetType() != null && !dictionaries.targetTypes().contains(rule.limitTargetType()))
+                || !dictionaries.metrics().contains(measure.metric())
+                || (measure.period() != null && !dictionaries.periods().contains(measure.period()))
+                || (measure.aggregationScope() != null && !dictionaries.aggregationScopes().contains(measure.aggregationScope()))
                 || rule.attributeSelector() == null
-                || !dictionaries.attributeSelectorTypes().contains(rule.attributeSelector().type())) {
+                || !dictionaries.attributeSelectorTypes().contains(rule.attributeSelector().type());
+        if (invalid) {
             diagnostics.add(diagnostic(
                     "MANIFEST_INVALID_RULE_DEFINITION",
                     "Rule references unsupported enum value",
@@ -290,7 +285,6 @@ public class RuleManifestCompiler {
 
     private void detectOperationScopeOverlaps(
             List<CompiledRule> rules,
-            Map<String, OperationType> operationTypesByCode,
             List<ManifestDiagnostic> diagnostics
     ) {
         Map<NonOperationKey, List<CompiledRule>> byNonOperation = rules.stream()
@@ -302,7 +296,7 @@ public class RuleManifestCompiler {
         for (List<CompiledRule> group : byNonOperation.values()) {
             for (int left = 0; left < group.size(); left++) {
                 for (int right = left + 1; right < group.size(); right++) {
-                    if (operationScopesOverlap(group.get(left), group.get(right), operationTypesByCode)) {
+                    if (operationScopesOverlap(group.get(left), group.get(right))) {
                         diagnostics.add(diagnostic(
                                 "MANIFEST_OVERLAPPING_OPERATION_SCOPE",
                                 "Operation scopes overlap for the same matcher and measure",
@@ -315,27 +309,9 @@ public class RuleManifestCompiler {
         }
     }
 
-    private boolean operationScopesOverlap(
-            CompiledRule left,
-            CompiledRule right,
-            Map<String, OperationType> operationTypesByCode
-    ) {
-        RuleSelector<OperationSelectorType> leftSelector = left.matcher().operation();
-        RuleSelector<OperationSelectorType> rightSelector = right.matcher().operation();
-        if (leftSelector.type() == rightSelector.type()) {
-            return false;
-        }
-        if (leftSelector.type() == OperationSelectorType.ANY || rightSelector.type() == OperationSelectorType.ANY) {
-            return true;
-        }
-        RuleSelector<OperationSelectorType> familySelector = leftSelector.type() == OperationSelectorType.FAMILY
-                ? leftSelector
-                : rightSelector;
-        RuleSelector<OperationSelectorType> typeSelector = leftSelector.type() == OperationSelectorType.TYPE
-                ? leftSelector
-                : rightSelector;
-        OperationType operationType = operationTypesByCode.get(typeSelector.value());
-        return operationType != null && familySelector.value().equals(operationType.familyCode());
+    private boolean operationScopesOverlap(CompiledRule left, CompiledRule right) {
+        return left.matcher().operationTypes().stream()
+                .anyMatch(right.matcher().operationTypes()::contains);
     }
 
     private RuleManifest buildManifest(int version, List<CompiledRule> compiledRules) {
@@ -394,7 +370,9 @@ public class RuleManifestCompiler {
                     null,
                     0,
                     rule.matcher(),
-                    rule.measure()
+                    rule.measure(),
+                    null,
+                    null
             );
         }
     }
@@ -403,7 +381,7 @@ public class RuleManifestCompiler {
             OperationDirection direction,
             RuleSelector<AttributeSelectorType> attribute,
             LimitTargetType targetType,
-            CompiledRule.Measure measure
+            Measure measure
     ) {
         NonOperationKey(CompiledRule rule) {
             this(rule.matcher().direction(), rule.matcher().attribute(), rule.matcher().targetType(), rule.measure());

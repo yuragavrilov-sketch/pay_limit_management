@@ -20,8 +20,8 @@ import ru.copperside.paylimits.management.limitrule.domain.CounterpartyType;
 import ru.copperside.paylimits.management.limitrule.domain.DictionaryItem;
 import ru.copperside.paylimits.management.limitrule.domain.LimitRule;
 import ru.copperside.paylimits.management.limitrule.domain.LimitTargetType;
+import ru.copperside.paylimits.management.limitrule.domain.Measure;
 import ru.copperside.paylimits.management.limitrule.domain.OperationDirection;
-import ru.copperside.paylimits.management.limitrule.domain.OperationSelectorType;
 import ru.copperside.paylimits.management.limitrule.domain.OperationType;
 import ru.copperside.paylimits.management.limitrule.domain.RuleDictionaries;
 import ru.copperside.paylimits.management.limitrule.domain.RuleManifest;
@@ -37,9 +37,11 @@ import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Timestamp;
 import java.util.Arrays;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 
 @Repository
@@ -81,7 +83,6 @@ public class PostgresRuleManifestRepository implements RuleManifestRepository {
                 listDictionary("card_types"),
                 listDictionary("card_levels"),
                 Arrays.asList(OperationDirection.values()),
-                Arrays.asList(OperationSelectorType.values()),
                 Arrays.asList(AttributeSelectorType.values()),
                 Arrays.asList(LimitTargetType.values()),
                 Arrays.asList(RuleMetric.values()),
@@ -199,10 +200,10 @@ public class PostgresRuleManifestRepository implements RuleManifestRepository {
 
     private String ruleSelect() {
         return """
-                select r.id, r.code, r.version, r.name,
-                       r.operation_selector_type, r.operation_selector_value, r.direction,
+                select r.id, r.code, r.version, r.name, r.direction,
                        r.attribute_selector_type, r.attribute_selector_value,
-                       r.target_type, r.metric, r.period, r.currency, r.status,
+                       r.target_type, r.metric, r.period, r.aggregation_scope, r.currency,
+                       r.interval_minutes, r.limit_value, r.error_message_template, r.status,
                        r.created_at, r.updated_at, r.activated_at, r.disabled_at
                 from limit_management.limit_rules r
                 """;
@@ -235,32 +236,45 @@ public class PostgresRuleManifestRepository implements RuleManifestRepository {
     }
 
     private LimitRule mapRule(ResultSet rs) throws SQLException {
+        UUID id = rs.getObject("id", UUID.class);
         Timestamp activatedAt = rs.getTimestamp("activated_at");
         Timestamp disabledAt = rs.getTimestamp("disabled_at");
+        String period = rs.getString("period");
+        String scope = rs.getString("aggregation_scope");
+        String targetType = rs.getString("target_type");
+        Integer intervalMinutes = (Integer) rs.getObject("interval_minutes");
         return new LimitRule(
-                rs.getObject("id", UUID.class),
+                id,
                 rs.getString("code"),
                 rs.getInt("version"),
                 rs.getString("name"),
-                new RuleSelector<>(
-                        OperationSelectorType.valueOf(rs.getString("operation_selector_type")),
-                        rs.getString("operation_selector_value")
-                ),
+                loadOperationTypes(id),
                 OperationDirection.valueOf(rs.getString("direction")),
+                new Measure(
+                        RuleMetric.valueOf(rs.getString("metric")),
+                        period == null ? null : RulePeriod.valueOf(period),
+                        scope == null ? null : AggregationScope.valueOf(scope),
+                        rs.getString("currency"),
+                        intervalMinutes),
+                targetType == null ? null : LimitTargetType.valueOf(targetType),
+                rs.getBigDecimal("limit_value"),
+                rs.getString("error_message_template"),
                 new RuleSelector<>(
                         AttributeSelectorType.valueOf(rs.getString("attribute_selector_type")),
                         rs.getString("attribute_selector_value")
                 ),
-                LimitTargetType.valueOf(rs.getString("target_type")),
-                RuleMetric.valueOf(rs.getString("metric")),
-                RulePeriod.valueOf(rs.getString("period")),
-                rs.getString("currency"),
                 RuleStatus.valueOf(rs.getString("status")),
                 rs.getTimestamp("created_at").toInstant(),
                 rs.getTimestamp("updated_at").toInstant(),
                 activatedAt == null ? null : activatedAt.toInstant(),
                 disabledAt == null ? null : disabledAt.toInstant()
         );
+    }
+
+    private Set<String> loadOperationTypes(UUID ruleId) {
+        return new LinkedHashSet<>(jdbcTemplate.queryForList(
+                "select operation_type_code from limit_management.limit_rule_operation_type where rule_id = ? order by operation_type_code",
+                String.class, ruleId));
     }
 
     private RuleManifestPayload readPayload(String json) {

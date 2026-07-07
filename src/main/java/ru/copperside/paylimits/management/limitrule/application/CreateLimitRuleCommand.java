@@ -2,21 +2,22 @@ package ru.copperside.paylimits.management.limitrule.application;
 
 import ru.copperside.paylimits.management.limitrule.domain.AttributeSelectorType;
 import ru.copperside.paylimits.management.limitrule.domain.LimitTargetType;
+import ru.copperside.paylimits.management.limitrule.domain.Measure;
 import ru.copperside.paylimits.management.limitrule.domain.OperationDirection;
-import ru.copperside.paylimits.management.limitrule.domain.OperationSelectorType;
 import ru.copperside.paylimits.management.limitrule.domain.RuleSelector;
-import ru.copperside.paylimits.management.limitrule.domain.RuleMetric;
-import ru.copperside.paylimits.management.limitrule.domain.RulePeriod;
+
+import java.math.BigDecimal;
+import java.util.Set;
 
 public record CreateLimitRuleCommand(
         String code,
         String name,
-        RuleSelector<OperationSelectorType> operationSelector,
+        Set<String> operationTypes,
         OperationDirection direction,
-        RuleSelector<AttributeSelectorType> attributeSelector,
-        LimitTargetType targetType,
-        RuleMetric metric,
-        RulePeriod period,
-        String currency
+        Measure measure,
+        LimitTargetType limitTargetType,
+        BigDecimal limitValue,
+        String errorMessageTemplate,
+        RuleSelector<AttributeSelectorType> attributeSelector
 ) {
 }

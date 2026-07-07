@@ -10,8 +10,8 @@ import ru.copperside.paylimits.management.limitrule.domain.DictionaryItem;
 import ru.copperside.paylimits.management.limitrule.domain.LimitRule;
 import ru.copperside.paylimits.management.limitrule.domain.LimitRuleProblemException;
 import ru.copperside.paylimits.management.limitrule.domain.LimitTargetType;
+import ru.copperside.paylimits.management.limitrule.domain.Measure;
 import ru.copperside.paylimits.management.limitrule.domain.OperationDirection;
-import ru.copperside.paylimits.management.limitrule.domain.OperationSelectorType;
 import ru.copperside.paylimits.management.limitrule.domain.OperationType;
 import ru.copperside.paylimits.management.limitrule.domain.RuleDictionaries;
 import ru.copperside.paylimits.management.limitrule.domain.RuleMetric;
@@ -19,6 +19,7 @@ import ru.copperside.paylimits.management.limitrule.domain.RulePeriod;
 import ru.copperside.paylimits.management.limitrule.domain.RuleSelector;
 import ru.copperside.paylimits.management.limitrule.domain.RuleStatus;
 
+import java.math.BigDecimal;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
@@ -56,17 +57,18 @@ class LimitRuleServiceTest {
         assertThat(dictionaries.operationFamilies()).extracting(DictionaryItem::code).contains("SBP");
         assertThat(dictionaries.operationTypes()).extracting(OperationType::code).contains("SBP_C2B");
         assertThat(dictionaries.attributeSelectorTypes()).contains(AttributeSelectorType.PAYMENT_SYSTEM);
-        assertThat(dictionaries.targetTypes()).contains(LimitTargetType.ANY, LimitTargetType.CARD, LimitTargetType.PHONE);
+        assertThat(dictionaries.targetTypes())
+                .contains(LimitTargetType.CARD, LimitTargetType.PHONE, LimitTargetType.ACCOUNT);
     }
 
     @Test
     void createsOperationTypeWithGeneratedIdAndAuditTimestamps() {
         OperationType type = service.createOperationType(new CreateOperationTypeCommand(
-                "SBP_C2C", "SBP C2C", "SBP", OperationDirection.ALL, CounterpartyType.PHONE
+                "SBP_C2B", "SBP C2B", "SBP", OperationDirection.IN, CounterpartyType.PHONE
         ));
 
         assertThat(type.id()).isNotNull();
-        assertThat(type.code()).isEqualTo("SBP_C2C");
+        assertThat(type.code()).isEqualTo("SBP_C2B");
         assertThat(type.enabled()).isTrue();
         assertThat(type.sortOrder()).isZero();
         assertThat(type.createdAt()).isEqualTo(NOW);
@@ -76,31 +78,31 @@ class LimitRuleServiceTest {
     @Test
     void rejectsOperationTypeCreationWithoutRequiredFields() {
         assertThatThrownBy(() -> service.createOperationType(new CreateOperationTypeCommand(
-                " ", "SBP C2C", "SBP", OperationDirection.ALL, CounterpartyType.PHONE
+                " ", "SBP C2B", "SBP", OperationDirection.IN, CounterpartyType.PHONE
         )))
                 .isInstanceOf(LimitRuleProblemException.class)
                 .hasMessageContaining("VALIDATION_ERROR");
 
         assertThatThrownBy(() -> service.createOperationType(new CreateOperationTypeCommand(
-                "SBP_C2C", null, "SBP", OperationDirection.ALL, CounterpartyType.PHONE
+                "SBP_C2B", null, "SBP", OperationDirection.IN, CounterpartyType.PHONE
         )))
                 .isInstanceOf(LimitRuleProblemException.class)
                 .hasMessageContaining("VALIDATION_ERROR");
 
         assertThatThrownBy(() -> service.createOperationType(new CreateOperationTypeCommand(
-                "SBP_C2C", "SBP C2C", "", OperationDirection.ALL, CounterpartyType.PHONE
+                "SBP_C2B", "SBP C2B", "", OperationDirection.IN, CounterpartyType.PHONE
         )))
                 .isInstanceOf(LimitRuleProblemException.class)
                 .hasMessageContaining("VALIDATION_ERROR");
 
         assertThatThrownBy(() -> service.createOperationType(new CreateOperationTypeCommand(
-                "SBP_C2C", "SBP C2C", "SBP", null, CounterpartyType.PHONE
+                "SBP_C2B", "SBP C2B", "SBP", null, CounterpartyType.PHONE
         )))
                 .isInstanceOf(LimitRuleProblemException.class)
                 .hasMessageContaining("VALIDATION_ERROR");
 
         assertThatThrownBy(() -> service.createOperationType(new CreateOperationTypeCommand(
-                "SBP_C2C", "SBP C2C", "SBP", OperationDirection.ALL, null
+                "SBP_C2B", "SBP C2B", "SBP", OperationDirection.IN, null
         )))
                 .isInstanceOf(LimitRuleProblemException.class)
                 .hasMessageContaining("VALIDATION_ERROR");
@@ -108,26 +110,26 @@ class LimitRuleServiceTest {
 
     @Test
     void patchesOperationTypeAndPreservesNullFields() {
-        OperationType type = repository.addOperationType("SBP_C2C", OperationDirection.ALL, true);
+        OperationType type = repository.addOperationType("SBP_C2B", OperationDirection.IN, true);
 
         OperationType patched = service.patchOperationType(type.id(), new PatchOperationTypeCommand(
-                "SBP C2C updated", null, OperationDirection.IN, null, null
+                "SBP C2B updated", null, OperationDirection.OUT, null, null
         ));
 
         assertThat(patched.code()).isEqualTo(type.code());
-        assertThat(patched.name()).isEqualTo("SBP C2C updated");
+        assertThat(patched.name()).isEqualTo("SBP C2B updated");
         assertThat(patched.familyCode()).isEqualTo(type.familyCode());
-        assertThat(patched.direction()).isEqualTo(OperationDirection.IN);
+        assertThat(patched.direction()).isEqualTo(OperationDirection.OUT);
         assertThat(patched.counterpartyType()).isEqualTo(type.counterpartyType());
         assertThat(patched.enabled()).isEqualTo(type.enabled());
         assertThat(patched.updatedAt()).isEqualTo(NOW);
     }
 
     @Test
-    void rejectsDisablingOperationTypeWhenActiveTypeRulesUseIt() {
+    void rejectsDisablingOperationTypeWhenActiveRulesUseIt() {
         OperationType type = repository.addOperationType("SBP_C2B", OperationDirection.IN, true);
         LimitRule active = repository.addRule(
-                typeSelector(type.code()), OperationDirection.IN, noneSelector(),
+                Set.of(type.code()), OperationDirection.IN, noneSelector(),
                 "RULE_SBP_C2B_DAY", 1, RuleMetric.AMOUNT, RulePeriod.DAY, RuleStatus.ACTIVE
         );
 
@@ -140,118 +142,81 @@ class LimitRuleServiceTest {
     }
 
     @Test
-    void createsDraftAmountRuleWithExplicitTypeSelector() {
+    void createsDraftAmountRule() {
         OperationType type = repository.addOperationType("SBP_C2B", OperationDirection.IN, true);
 
         LimitRule rule = service.createRule(amountRule(
-                "RULE_SBP_C2B_DAY", "SBP C2B daily amount", typeSelector(type.code()), OperationDirection.IN
+                "RULE_SBP_C2B_DAY", "SBP C2B daily amount", Set.of(type.code()), OperationDirection.IN
         ));
 
         assertThat(rule.version()).isEqualTo(1);
         assertThat(rule.status()).isEqualTo(RuleStatus.DRAFT);
-        assertThat(rule.operationSelector()).isEqualTo(typeSelector("SBP_C2B"));
+        assertThat(rule.operationTypes()).containsExactly("SBP_C2B");
         assertThat(rule.direction()).isEqualTo(OperationDirection.IN);
         assertThat(rule.attributeSelector()).isEqualTo(noneSelector());
-        assertThat(rule.targetType()).isEqualTo(LimitTargetType.PHONE);
-        assertThat(rule.currency()).isEqualTo("RUB");
+        assertThat(rule.limitTargetType()).isEqualTo(LimitTargetType.PHONE);
+        assertThat(rule.measure().metric()).isEqualTo(RuleMetric.AMOUNT);
+        assertThat(rule.limitValue()).isEqualByComparingTo("1000.00");
+        assertThat(rule.errorMessageTemplate()).isEqualTo("template");
     }
 
     @Test
-    void createsDraftRuleWithFamilyAndPaymentSystemSelectors() {
+    void createsDraftRuleWithMultipleOperationTypesAndAttributeSelector() {
         repository.addOperationType("SBP_C2B", OperationDirection.IN, true);
+        repository.addOperationType("SBP_B2B_IN", OperationDirection.IN, true);
 
         LimitRule rule = service.createRule(new CreateLimitRuleCommand(
                 "RULE_SBP_MIR_DAY",
                 "SBP MIR daily amount",
-                familySelector("SBP"),
+                Set.of("SBP_C2B", "SBP_B2B_IN"),
                 OperationDirection.IN,
-                new RuleSelector<>(AttributeSelectorType.PAYMENT_SYSTEM, "MIR"),
+                new Measure(RuleMetric.AMOUNT, RulePeriod.DAY, AggregationScope.OWNER, "RUB", null),
                 LimitTargetType.PHONE,
-                RuleMetric.AMOUNT,
-                RulePeriod.DAY,
-                "RUB"
+                new BigDecimal("1000.00"),
+                "template",
+                new RuleSelector<>(AttributeSelectorType.PAYMENT_SYSTEM, "MIR")
         ));
 
-        assertThat(rule.operationSelector()).isEqualTo(familySelector("SBP"));
+        assertThat(rule.operationTypes()).containsExactlyInAnyOrder("SBP_C2B", "SBP_B2B_IN");
         assertThat(rule.attributeSelector()).isEqualTo(new RuleSelector<>(AttributeSelectorType.PAYMENT_SYSTEM, "MIR"));
     }
 
     @Test
-    void createsDraftCountRuleWithoutCurrency() {
-        repository.addOperationType("SBP_B2C", OperationDirection.OUT, true);
-
-        LimitRule rule = service.createRule(new CreateLimitRuleCommand(
-                "RULE_SBP_COUNT_WEEK",
-                "SBP weekly count",
-                familySelector("SBP"),
-                OperationDirection.OUT,
-                noneSelector(),
-                LimitTargetType.PHONE,
-                RuleMetric.COUNT,
-                RulePeriod.WEEK,
-                null
-        ));
-
-        assertThat(rule.currency()).isNull();
-    }
-
-    @Test
-    void rejectsInvalidSelectorDefinitions() {
+    void rejectsInvalidOperationTypeAndAttributeDefinitions() {
         OperationType disabled = repository.addOperationType("SBP_DISABLED", OperationDirection.IN, false);
 
         assertThatThrownBy(() -> service.createRule(amountRule(
-                "RULE_UNKNOWN_FAMILY", "Unknown family", familySelector("UNKNOWN"), OperationDirection.IN
+                "RULE_UNKNOWN_TYPE", "Unknown type", Set.of("UNKNOWN"), OperationDirection.IN
         )))
                 .isInstanceOf(LimitRuleProblemException.class)
                 .hasMessageContaining("RULE_SELECTOR_INVALID");
 
         assertThatThrownBy(() -> service.createRule(amountRule(
-                "RULE_DISABLED_TYPE", "Disabled type", typeSelector(disabled.code()), OperationDirection.IN
+                "RULE_DISABLED_TYPE", "Disabled type", Set.of(disabled.code()), OperationDirection.IN
         )))
                 .isInstanceOf(LimitRuleProblemException.class)
                 .hasMessageContaining("OPERATION_TYPE_DISABLED");
 
+        repository.addOperationType("SBP_C2B", OperationDirection.IN, true);
         assertThatThrownBy(() -> service.createRule(new CreateLimitRuleCommand(
                 "RULE_UNKNOWN_PAYMENT_SYSTEM",
                 "Unknown payment system",
-                anyOperationSelector(),
+                Set.of("SBP_C2B"),
                 OperationDirection.IN,
-                new RuleSelector<>(AttributeSelectorType.PAYMENT_SYSTEM, "UNKNOWN"),
+                new Measure(RuleMetric.AMOUNT, RulePeriod.DAY, AggregationScope.OWNER, "RUB", null),
                 LimitTargetType.CARD,
-                RuleMetric.AMOUNT,
-                RulePeriod.DAY,
-                "RUB"
+                new BigDecimal("1000.00"),
+                "template",
+                new RuleSelector<>(AttributeSelectorType.PAYMENT_SYSTEM, "UNKNOWN")
         )))
                 .isInstanceOf(LimitRuleProblemException.class)
                 .hasMessageContaining("RULE_SELECTOR_INVALID");
     }
 
     @Test
-    void rejectsInvalidCurrencyForMetric() {
-        assertThatThrownBy(() -> service.createRule(new CreateLimitRuleCommand(
-                "RULE_AMOUNT_NO_CURRENCY",
-                "Amount without currency",
-                anyOperationSelector(),
-                OperationDirection.ALL,
-                noneSelector(),
-                LimitTargetType.ANY,
-                RuleMetric.AMOUNT,
-                RulePeriod.DAY,
-                null
-        )))
-                .isInstanceOf(LimitRuleProblemException.class)
-                .hasMessageContaining("VALIDATION_ERROR");
-
-        assertThatThrownBy(() -> service.createRule(new CreateLimitRuleCommand(
-                "RULE_COUNT_WITH_CURRENCY",
-                "Count with currency",
-                anyOperationSelector(),
-                OperationDirection.ALL,
-                noneSelector(),
-                LimitTargetType.ANY,
-                RuleMetric.COUNT,
-                RulePeriod.DAY,
-                "RUB"
+    void rejectsRuleCreationWithoutOperationTypes() {
+        assertThatThrownBy(() -> service.createRule(amountRule(
+                "RULE_NO_TYPES", "No operation types", Set.of(), OperationDirection.IN
         )))
                 .isInstanceOf(LimitRuleProblemException.class)
                 .hasMessageContaining("VALIDATION_ERROR");
@@ -259,46 +224,49 @@ class LimitRuleServiceTest {
 
     @Test
     void createRuleRejectsWhenDraftAlreadyExistsForCode() {
+        repository.addOperationType("SBP_C2B", OperationDirection.IN, true);
         service.createRule(amountRule(
-                "RULE_SBP_C2B_DAY", "SBP C2B daily amount", familySelector("SBP"), OperationDirection.IN
+                "RULE_SBP_C2B_DAY", "SBP C2B daily amount", Set.of("SBP_C2B"), OperationDirection.IN
         ));
 
         assertThatThrownBy(() -> service.createRule(amountRule(
-                "RULE_SBP_C2B_DAY", "SBP C2B daily amount duplicate", familySelector("SBP"), OperationDirection.IN
+                "RULE_SBP_C2B_DAY", "SBP C2B daily amount duplicate", Set.of("SBP_C2B"), OperationDirection.IN
         )))
                 .isInstanceOf(LimitRuleProblemException.class)
                 .hasMessageContaining("RULE_DRAFT_EXISTS");
     }
 
     @Test
-    void patchesDraftRuleSelectorsAndMetric() {
+    void patchesDraftRuleOperationTypesAndMeasure() {
+        repository.addOperationType("SBP_C2B", OperationDirection.IN, true);
+        repository.addOperationType("SBP_B2C", OperationDirection.OUT, true);
         LimitRule draft = service.createRule(amountRule(
-                "RULE_SBP_DAY", "SBP daily amount", familySelector("SBP"), OperationDirection.IN
+                "RULE_SBP_DAY", "SBP daily amount", Set.of("SBP_C2B"), OperationDirection.IN
         ));
 
         LimitRule patched = service.patchRule(draft.id(), new PatchLimitRuleCommand(
                 "Updated monthly count",
-                anyOperationSelector(),
-                OperationDirection.ALL,
-                noneSelector(),
-                LimitTargetType.ANY,
-                RuleMetric.COUNT,
-                RulePeriod.MONTH,
-                null
+                Set.of("SBP_B2C"),
+                OperationDirection.OUT,
+                new Measure(RuleMetric.COUNT, RulePeriod.MONTH, AggregationScope.OWNER, null, null),
+                LimitTargetType.PHONE,
+                new BigDecimal("5"),
+                "template",
+                noneSelector()
         ));
 
         assertThat(patched.name()).isEqualTo("Updated monthly count");
-        assertThat(patched.operationSelector()).isEqualTo(anyOperationSelector());
-        assertThat(patched.direction()).isEqualTo(OperationDirection.ALL);
-        assertThat(patched.targetType()).isEqualTo(LimitTargetType.ANY);
-        assertThat(patched.metric()).isEqualTo(RuleMetric.COUNT);
-        assertThat(patched.currency()).isNull();
+        assertThat(patched.operationTypes()).containsExactly("SBP_B2C");
+        assertThat(patched.direction()).isEqualTo(OperationDirection.OUT);
+        assertThat(patched.measure().metric()).isEqualTo(RuleMetric.COUNT);
+        assertThat(patched.measure().period()).isEqualTo(RulePeriod.MONTH);
     }
 
     @Test
     void activatesDraftAndMakesItImmutable() {
+        repository.addOperationType("SBP_C2B", OperationDirection.IN, true);
         LimitRule draft = service.createRule(amountRule(
-                "RULE_SBP_C2B_DAY", "SBP C2B daily amount", familySelector("SBP"), OperationDirection.IN
+                "RULE_SBP_C2B_DAY", "SBP C2B daily amount", Set.of("SBP_C2B"), OperationDirection.IN
         ));
 
         LimitRule active = service.activateRule(draft.id());
@@ -306,7 +274,7 @@ class LimitRuleServiceTest {
         assertThat(active.status()).isEqualTo(RuleStatus.ACTIVE);
         assertThat(active.activatedAt()).isEqualTo(NOW);
         assertThatThrownBy(() -> service.patchRule(active.id(), new PatchLimitRuleCommand(
-                "Changed", null, null, null, null, RuleMetric.COUNT, RulePeriod.WEEK, null
+                "Changed", null, null, null, null, null, null, null
         )))
                 .isInstanceOf(LimitRuleProblemException.class)
                 .hasMessageContaining("RULE_STATUS_CONFLICT");
@@ -314,8 +282,9 @@ class LimitRuleServiceTest {
 
     @Test
     void activateRuleRejectsWhenAnotherActiveVersionExistsForCode() {
+        repository.addOperationType("SBP_C2B", OperationDirection.IN, true);
         LimitRule active = service.activateRule(service.createRule(amountRule(
-                "RULE_SBP_C2B_DAY", "SBP C2B daily amount", familySelector("SBP"), OperationDirection.IN
+                "RULE_SBP_C2B_DAY", "SBP C2B daily amount", Set.of("SBP_C2B"), OperationDirection.IN
         )).id());
         LimitRule draft = service.createNewVersion(active.id());
 
@@ -325,25 +294,10 @@ class LimitRuleServiceTest {
     }
 
     @Test
-    void rejectsActivationWhenTypeSelectorWasDisabledAfterDraftCreation() {
-        OperationType type = repository.addOperationType("SBP_C2B", OperationDirection.IN, true);
-        LimitRule draft = service.createRule(amountRule(
-                "RULE_SBP_C2B_DAY", "SBP C2B daily amount", typeSelector(type.code()), OperationDirection.IN
-        ));
-        repository.updateOperationType(new OperationType(
-                type.id(), type.code(), type.name(), type.familyCode(), type.direction(), type.counterpartyType(), false,
-                type.sortOrder(), type.createdAt(), type.updatedAt()
-        ));
-
-        assertThatThrownBy(() -> service.activateRule(draft.id()))
-                .isInstanceOf(LimitRuleProblemException.class)
-                .hasMessageContaining("OPERATION_TYPE_DISABLED");
-    }
-
-    @Test
     void createsNextDraftVersionFromActiveRule() {
+        repository.addOperationType("SBP_C2B", OperationDirection.IN, true);
         LimitRule active = service.activateRule(service.createRule(amountRule(
-                "RULE_SBP_C2B_DAY", "SBP C2B daily amount", familySelector("SBP"), OperationDirection.IN
+                "RULE_SBP_C2B_DAY", "SBP C2B daily amount", Set.of("SBP_C2B"), OperationDirection.IN
         )).id());
 
         LimitRule next = service.createNewVersion(active.id());
@@ -351,18 +305,18 @@ class LimitRuleServiceTest {
         assertThat(next.code()).isEqualTo("RULE_SBP_C2B_DAY");
         assertThat(next.version()).isEqualTo(2);
         assertThat(next.status()).isEqualTo(RuleStatus.DRAFT);
-        assertThat(next.operationSelector()).isEqualTo(active.operationSelector());
+        assertThat(next.operationTypes()).isEqualTo(active.operationTypes());
         assertThat(next.direction()).isEqualTo(active.direction());
     }
 
     @Test
     void rejectsNewVersionWhenDraftAlreadyExistsForCode() {
         LimitRule active = repository.addRule(
-                familySelector("SBP"), OperationDirection.IN, noneSelector(),
+                Set.of("SBP_C2B"), OperationDirection.IN, noneSelector(),
                 "RULE_SBP_C2B_DAY", 1, RuleMetric.AMOUNT, RulePeriod.DAY, RuleStatus.ACTIVE
         );
         repository.addRule(
-                familySelector("SBP"), OperationDirection.IN, noneSelector(),
+                Set.of("SBP_C2B"), OperationDirection.IN, noneSelector(),
                 "RULE_SBP_C2B_DAY", 2, RuleMetric.AMOUNT, RulePeriod.DAY, RuleStatus.DRAFT
         );
 
@@ -374,7 +328,7 @@ class LimitRuleServiceTest {
     @Test
     void disablesOnlyActiveRuleAndSetsDisabledAt() {
         LimitRule active = repository.addRule(
-                familySelector("SBP"), OperationDirection.IN, noneSelector(),
+                Set.of("SBP_C2B"), OperationDirection.IN, noneSelector(),
                 "RULE_SBP_C2B_DAY", 1, RuleMetric.AMOUNT, RulePeriod.DAY, RuleStatus.ACTIVE
         );
 
@@ -390,7 +344,7 @@ class LimitRuleServiceTest {
     @Test
     void rejectsReactivationOfDisabledRule() {
         LimitRule disabled = repository.addRule(
-                familySelector("SBP"), OperationDirection.IN, noneSelector(),
+                Set.of("SBP_C2B"), OperationDirection.IN, noneSelector(),
                 "RULE_SBP_C2B_DAY", 1, RuleMetric.AMOUNT, RulePeriod.DAY, RuleStatus.DISABLED
         );
 
@@ -402,32 +356,20 @@ class LimitRuleServiceTest {
     private CreateLimitRuleCommand amountRule(
             String code,
             String name,
-            RuleSelector<OperationSelectorType> operationSelector,
+            Set<String> operationTypes,
             OperationDirection direction
     ) {
         return new CreateLimitRuleCommand(
                 code,
                 name,
-                operationSelector,
+                operationTypes,
                 direction,
-                noneSelector(),
+                new Measure(RuleMetric.AMOUNT, RulePeriod.DAY, AggregationScope.OWNER, "RUB", null),
                 LimitTargetType.PHONE,
-                RuleMetric.AMOUNT,
-                RulePeriod.DAY,
-                "RUB"
+                new BigDecimal("1000.00"),
+                "template",
+                noneSelector()
         );
-    }
-
-    private static RuleSelector<OperationSelectorType> anyOperationSelector() {
-        return new RuleSelector<>(OperationSelectorType.ANY, null);
-    }
-
-    private static RuleSelector<OperationSelectorType> familySelector(String value) {
-        return new RuleSelector<>(OperationSelectorType.FAMILY, value);
-    }
-
-    private static RuleSelector<OperationSelectorType> typeSelector(String value) {
-        return new RuleSelector<>(OperationSelectorType.TYPE, value);
     }
 
     private static RuleSelector<AttributeSelectorType> noneSelector() {
@@ -455,7 +397,7 @@ class LimitRuleServiceTest {
         }
 
         LimitRule addRule(
-                RuleSelector<OperationSelectorType> operationSelector,
+                Set<String> operationTypes,
                 OperationDirection direction,
                 RuleSelector<AttributeSelectorType> attributeSelector,
                 String code,
@@ -469,13 +411,13 @@ class LimitRuleServiceTest {
                     code,
                     version,
                     code,
-                    operationSelector,
+                    operationTypes,
                     direction,
-                    attributeSelector,
+                    new Measure(metric, period, AggregationScope.OWNER, metric == RuleMetric.AMOUNT ? "RUB" : null, null),
                     LimitTargetType.PHONE,
-                    metric,
-                    period,
-                    metric == RuleMetric.AMOUNT ? "RUB" : null,
+                    metric == RuleMetric.INTERVAL ? null : new BigDecimal("1000.00"),
+                    "template",
+                    attributeSelector,
                     status,
                     Instant.EPOCH,
                     Instant.EPOCH,
@@ -503,7 +445,6 @@ class LimitRuleServiceTest {
                     dictionaryItems(cardTypes),
                     dictionaryItems(cardLevels),
                     Arrays.asList(OperationDirection.values()),
-                    Arrays.asList(OperationSelectorType.values()),
                     Arrays.asList(AttributeSelectorType.values()),
                     Arrays.asList(LimitTargetType.values()),
                     Arrays.asList(RuleMetric.values()),
@@ -521,11 +462,6 @@ class LimitRuleServiceTest {
         @Override
         public Optional<OperationType> findOperationTypeByCode(String code) {
             return operationTypes.stream().filter(type -> type.code().equals(code)).findFirst();
-        }
-
-        @Override
-        public boolean operationFamilyExists(String code) {
-            return operationFamilies.contains(code);
         }
 
         @Override
@@ -557,9 +493,7 @@ class LimitRuleServiceTest {
         public boolean hasActiveRulesForOperationTypeCode(String operationTypeCode) {
             return rules.stream()
                     .filter(rule -> rule.status() == RuleStatus.ACTIVE)
-                    .map(LimitRule::operationSelector)
-                    .anyMatch(selector -> selector.type() == OperationSelectorType.TYPE
-                            && operationTypeCode.equals(selector.value()));
+                    .anyMatch(rule -> rule.operationTypes().contains(operationTypeCode));
         }
 
         @Override
