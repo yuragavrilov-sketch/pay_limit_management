@@ -215,7 +215,7 @@ class RuntimeManifestCompilerTest {
 
         assertThat(manifestOne.checksum()).isEqualTo(manifestTwo.checksum());
         RuntimeManifestCanonicalJson canonicalJson = new RuntimeManifestCanonicalJson();
-        assertThat(canonicalJson.bytes(manifestOne.payload())).isEqualTo(canonicalJson.bytes(manifestTwo.payload()));
+        assertThat(canonicalJson.payloadBytes(manifestOne.payload())).isEqualTo(canonicalJson.payloadBytes(manifestTwo.payload()));
     }
 
     @Test

@@ -9,6 +9,7 @@ import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnExpression;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.jdbc.core.RowCallbackHandler;
 import org.springframework.stereotype.Repository;
 import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Transactional;
@@ -42,12 +43,15 @@ import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Timestamp;
 import java.time.Instant;
+import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
+import java.util.stream.Collectors;
 
 @Repository
 @ConditionalOnExpression("!'${spring.autoconfigure.exclude:}'.contains('DataSourceAutoConfiguration')")
@@ -70,14 +74,27 @@ public class PostgresRuntimeManifestRepository implements RuntimeManifestReposit
 
     @Override
     public List<LimitRule> listActiveRulesForCompilation() {
-        return jdbcTemplate.query(ruleSelect() + """
+        // Batch operationTypes for the whole compilation set instead of one junction-table query per
+        // rule (N+1): map rows with a placeholder set first, then attach real sets via one IN-query.
+        List<LimitRule> rules = jdbcTemplate.query(ruleSelect() + """
                 where r.status = 'ACTIVE'
                 order by r.code asc, r.version asc, r.id asc
-                """, (rs, rowNum) -> mapRule(rs));
+                """, (rs, rowNum) -> mapRule(rs, Set.of()));
+        if (rules.isEmpty()) {
+            return rules;
+        }
+        Map<UUID, Set<String>> operationTypesByRule =
+                loadOperationTypesForRules(rules.stream().map(LimitRule::id).toList());
+        return rules.stream()
+                .map(rule -> withOperationTypes(rule, operationTypesByRule.getOrDefault(rule.id(), Set.of())))
+                .toList();
     }
 
     @Override
     public List<RuntimeCompiledAssignment> listEnabledAssignmentsForCompilation() {
+        // SQL order is a coarse pre-sort only (not part of the determinism contract) — the definitive
+        // deterministic order, including nulls-first handling of owner_id (GLOBAL assignments), is
+        // applied by the Java Comparator in RuntimeManifestCompiler.buildManifest.
         return jdbcTemplate.query("""
                 select a.id as assignment_id, a.rule_id, r.code as rule_code,
                        a.owner_type, a.owner_id, a.limit_mode,
@@ -86,7 +103,7 @@ public class PostgresRuntimeManifestRepository implements RuntimeManifestReposit
                 join limit_management.limit_rules r on r.id = a.rule_id
                 where a.enabled = true
                   and r.status = 'ACTIVE'
-                order by r.code asc, a.owner_type asc, a.owner_id asc, a.id asc
+                order by r.code asc, a.owner_type asc, a.id asc
                 """, (rs, rowNum) -> mapAssignment(rs));
     }
 
@@ -133,7 +150,7 @@ public class PostgresRuntimeManifestRepository implements RuntimeManifestReposit
         validateManifest(manifest);
 
         RuntimeManifestPayload payload = manifest.payload();
-        String payloadJson = new String(canonicalJson.bytes(payload), StandardCharsets.UTF_8);
+        String payloadJson = new String(canonicalJson.payloadBytes(payload), StandardCharsets.UTF_8);
         try {
             jdbcTemplate.update("""
                     insert into limit_management.runtime_manifests
@@ -312,7 +329,7 @@ public class PostgresRuntimeManifestRepository implements RuntimeManifestReposit
         );
     }
 
-    private LimitRule mapRule(ResultSet rs) throws SQLException {
+    private LimitRule mapRule(ResultSet rs, Set<String> operationTypes) throws SQLException {
         UUID id = rs.getObject("id", UUID.class);
         Timestamp activatedAt = rs.getTimestamp("activated_at");
         Timestamp disabledAt = rs.getTimestamp("disabled_at");
@@ -325,7 +342,7 @@ public class PostgresRuntimeManifestRepository implements RuntimeManifestReposit
                 rs.getString("code"),
                 rs.getInt("version"),
                 rs.getString("name"),
-                loadOperationTypes(id),
+                operationTypes,
                 OperationDirection.valueOf(rs.getString("direction")),
                 new Measure(
                         RuleMetric.valueOf(rs.getString("metric")),
@@ -348,10 +365,31 @@ public class PostgresRuntimeManifestRepository implements RuntimeManifestReposit
         );
     }
 
-    private Set<String> loadOperationTypes(UUID ruleId) {
-        return new LinkedHashSet<>(jdbcTemplate.queryForList(
-                "select operation_type_code from limit_management.limit_rule_operation_type where rule_id = ? order by operation_type_code",
-                String.class, ruleId));
+    private LimitRule withOperationTypes(LimitRule rule, Set<String> operationTypes) {
+        return new LimitRule(
+                rule.id(), rule.code(), rule.version(), rule.name(), operationTypes, rule.direction(),
+                rule.measure(), rule.limitTargetType(), rule.limitValue(), rule.errorMessageTemplate(),
+                rule.attributeSelector(), rule.status(), rule.createdAt(), rule.updatedAt(),
+                rule.activatedAt(), rule.disabledAt());
+    }
+
+    /** Batches the per-rule operationTypes lookup into a single IN-query for multi-rule reads. */
+    private Map<UUID, Set<String>> loadOperationTypesForRules(List<UUID> ruleIds) {
+        if (ruleIds.isEmpty()) {
+            return Map.of();
+        }
+        String placeholders = ruleIds.stream().map(id -> "?").collect(Collectors.joining(", "));
+        Map<UUID, Set<String>> result = new LinkedHashMap<>();
+        jdbcTemplate.query(
+                "select rule_id, operation_type_code from limit_management.limit_rule_operation_type "
+                        + "where rule_id in (" + placeholders + ") order by rule_id, operation_type_code",
+                (RowCallbackHandler) rs -> {
+                    UUID ruleId = rs.getObject("rule_id", UUID.class);
+                    result.computeIfAbsent(ruleId, key -> new LinkedHashSet<>())
+                            .add(rs.getString("operation_type_code"));
+                },
+                ruleIds.toArray());
+        return result;
     }
 
     private RuntimeCompiledAssignment mapAssignment(ResultSet rs) throws SQLException {

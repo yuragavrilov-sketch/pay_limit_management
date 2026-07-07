@@ -54,6 +54,9 @@ public class PostgresLimitKindInvariantRepository implements LimitKindInvariantR
 
     @Override
     public List<LimitKind> kindsDeliveredByGroup(UUID groupId) {
+        // Intentional INNER join here (vs. the LEFT join in kindOfRule below): a rule with zero
+        // operation types can't be ACTIVE (validation 1-4), so an INNER join never silently drops a
+        // deliverable kind for this query.
         return jdbcTemplate.query("""
                 select r.metric, r.period, r.target_type, r.direction,
                        array_agg(ot.operation_type_code) as operation_types
@@ -122,6 +125,8 @@ public class PostgresLimitKindInvariantRepository implements LimitKindInvariantR
 
     @Override
     public Optional<LimitKind> kindOfRule(UUID ruleId) {
+        // LEFT join (vs. INNER above): must still return the rule's kind (with empty operation_types)
+        // when called mid-save before its operation-type rows exist, rather than silently returning empty.
         return jdbcTemplate.query("""
                 select r.metric, r.period, r.target_type, r.direction,
                        coalesce(

@@ -39,6 +39,13 @@ public class LimitKindInvariantChecker {
     /**
      * Checkpoint (a): a merchant is about to join {@code requestedGroupId}. Rejects if any kind that
      * group delivers conflicts with a kind the merchant already receives from another group.
+     *
+     * <p>Note: this checkpoint locks by merchant ({@link #lockMerchant}), while the assignment/
+     * activation checkpoints below lock by rule ({@code repository.lockRule}) — different advisory
+     * keys, so the two checkpoint families do not serialize against each other. A membership write and
+     * an assignment write racing on the same merchant+group pair can therefore both pass their own
+     * checkpoint concurrently; the compile-time snapshot re-check ({@link #findSnapshotConflicts}, 422)
+     * is the backstop that catches any overlap that slips through.
      */
     public void checkMembership(String merchantId, UUID requestedGroupId, Instant at) {
         repository.lockMerchant(merchantId);

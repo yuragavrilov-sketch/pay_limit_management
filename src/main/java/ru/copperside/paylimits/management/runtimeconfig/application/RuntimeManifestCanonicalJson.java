@@ -22,9 +22,9 @@ import java.util.HexFormat;
  * alphabetically at every level, ISO-8601 instants, explicit nulls serialized (deterministic), value
  * = {@code "sha256:" + hex}.
  *
- * <p>{@link #bytes(RuntimeManifestPayload)} serializes the internal payload verbatim and is used only
- * for the {@code payload_json} storage column (which retains the full internal model for faithful
- * read-back / rollback); it is never the hashed representation.
+ * <p>{@link #payloadBytes(RuntimeManifestPayload)} serializes the internal payload verbatim and is
+ * used only for the {@code payload_json} storage column (which retains the full internal model for
+ * faithful read-back / rollback); it is never the hashed representation.
  */
 public class RuntimeManifestCanonicalJson {
 
@@ -43,7 +43,7 @@ public class RuntimeManifestCanonicalJson {
      * Serializes the internal payload verbatim — used for the {@code payload_json} storage column,
      * never for the checksum.
      */
-    public byte[] bytes(RuntimeManifestPayload payload) {
+    public byte[] payloadBytes(RuntimeManifestPayload payload) {
         try {
             return objectMapper.writeValueAsBytes(payload);
         } catch (JsonProcessingException e) {

@@ -255,6 +255,35 @@ class PostgresLimitRuleRepositoryIntegrationTest {
     }
 
     @Test
+    void listRulesBatchesOperationTypesMatchingFindRule() {
+        // Regression for the N+1 fix in PostgresLimitRuleRepository.listRules(): the batched
+        // operationTypes must be set-identical (order is irrelevant — the manifest compiler sorts)
+        // to what the still-per-rule findRule() query returns.
+        Instant now = Instant.parse("2026-05-27T09:00:00Z");
+        LimitRule ruleA = rule(Set.of("SBP_C2B", "SBP_B2C"), OperationDirection.IN, noneSelector(),
+                "RULE_BATCH_A", 1, RuleStatus.DRAFT, RuleMetric.COUNT, now);
+        LimitRule ruleB = rule(Set.of("ECOM", "OCT", "AFT"), OperationDirection.IN, noneSelector(),
+                "RULE_BATCH_B", 1, RuleStatus.DRAFT, RuleMetric.COUNT, now);
+
+        repository.saveRule(ruleA);
+        repository.saveRule(ruleB);
+
+        Map<UUID, LimitRule> listedById = repository.listRules().stream()
+                .collect(Collectors.toMap(LimitRule::id, r -> r));
+
+        LimitRule listedA = listedById.get(ruleA.id());
+        LimitRule listedB = listedById.get(ruleB.id());
+        assertThat(listedA).isNotNull();
+        assertThat(listedB).isNotNull();
+        assertThat(listedA.operationTypes()).containsExactlyInAnyOrder("SBP_C2B", "SBP_B2C");
+        assertThat(listedB.operationTypes()).containsExactlyInAnyOrder("ECOM", "OCT", "AFT");
+        assertThat(listedA.operationTypes())
+                .isEqualTo(repository.findRule(ruleA.id()).orElseThrow().operationTypes());
+        assertThat(listedB.operationTypes())
+                .isEqualTo(repository.findRule(ruleB.id()).orElseThrow().operationTypes());
+    }
+
+    @Test
     void mapsUnknownOperationTypeReferenceToProblemCode() {
         Instant now = Instant.parse("2026-05-27T09:00:00Z");
 
