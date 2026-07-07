@@ -92,13 +92,16 @@ class RuntimeManifestControllerTest {
                                 }
                                 """))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.version").value(1))
+                .andExpect(jsonPath("$.data.document.manifestVersion").value(1))
+                .andExpect(jsonPath("$.data.document.schemaVersion").value(2))
                 .andExpect(jsonPath("$.data.status").value("VALID"))
-                .andExpect(jsonPath("$.data.effectiveFrom").value("2026-05-29T10:15:00Z"))
+                .andExpect(jsonPath("$.data.document.effectiveFrom").value("2026-05-29T10:15:00Z"))
                 .andExpect(jsonPath("$.data.ruleCount").value(1))
                 .andExpect(jsonPath("$.data.assignmentCount").value(1))
                 .andExpect(jsonPath("$.data.membershipCount").value(1))
-                .andExpect(jsonPath("$.data.assignments[0].ruleCode").value("RULE_SBP_PHONE_DAY"))
+                .andExpect(jsonPath("$.data.document.rules[0].code").value("RULE_SBP_PHONE_DAY"))
+                .andExpect(jsonPath("$.data.document.assignments[0].owner.level").value("MERCHANT"))
+                .andExpect(jsonPath("$.data.document.assignments[0].owner.id").value("502118"))
                 .andExpect(jsonPath("$.error").value(nullValue()));
     }
 
@@ -140,7 +143,7 @@ class RuntimeManifestControllerTest {
                         .queryParam("at", "2026-05-29T10:20:00Z"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.id").value(manifest.id().toString()))
-                .andExpect(jsonPath("$.data.effectiveFrom").value("2026-05-29T10:15:00Z"));
+                .andExpect(jsonPath("$.data.document.effectiveFrom").value("2026-05-29T10:15:00Z"));
     }
 
     @Test
@@ -191,7 +194,7 @@ class RuntimeManifestControllerTest {
                         .queryParam("at", "2026-05-29T10:20:00Z"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.id").value(manifest.id().toString()))
-                .andExpect(jsonPath("$.data.effectiveFrom").value("2026-05-29T10:15:00Z"));
+                .andExpect(jsonPath("$.data.document.effectiveFrom").value("2026-05-29T10:15:00Z"));
     }
 
     @Test
@@ -226,9 +229,9 @@ class RuntimeManifestControllerTest {
                                 }
                                 """))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.version").value(2))
-                .andExpect(jsonPath("$.data.effectiveFrom").value("2026-05-29T10:30:00Z"))
-                .andExpect(jsonPath("$.data.rules[0].code").value("RULE_SBP_PHONE_DAY"));
+                .andExpect(jsonPath("$.data.document.manifestVersion").value(2))
+                .andExpect(jsonPath("$.data.document.effectiveFrom").value("2026-05-29T10:30:00Z"))
+                .andExpect(jsonPath("$.data.document.rules[0].code").value("RULE_SBP_PHONE_DAY"));
     }
 
     @Test
@@ -267,7 +270,7 @@ class RuntimeManifestControllerTest {
         mockMvc.perform(get("/internal/v1/limit-management/runtime-manifests/{manifestId}", manifest.id()))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.id").value(manifest.id().toString()))
-                .andExpect(jsonPath("$.data.rules[0].code").value("RULE_SBP_PHONE_DAY"));
+                .andExpect(jsonPath("$.data.document.rules[0].code").value("RULE_SBP_PHONE_DAY"));
     }
 
     @TestConfiguration(proxyBeanMethods = false)

@@ -106,10 +106,10 @@ class GlobalAssignmentManifestIntegrationTest {
                 .andExpect(status().isOk())
                 .andReturn().getResponse().getContentAsString();
         JsonNode compiled = findByField(
-                objectMapper.readTree(manifestBody).at("/data/assignments"), "assignmentId", assignmentId.toString());
+                objectMapper.readTree(manifestBody).at("/data/document/assignments"), "assignmentId", assignmentId.toString());
         assertThat(compiled).isNotNull();
-        assertThat(compiled.get("ownerType").asText()).isEqualTo("GLOBAL");
-        assertThat(compiled.get("ownerId").isNull()).isTrue();
+        assertThat(compiled.get("owner").get("level").asText()).isEqualTo("GLOBAL");
+        assertThat(compiled.get("owner").get("id").isNull()).isTrue();
         assertThat(compiled.get("ruleId").asText()).isEqualTo(ruleId.toString());
     }
 
