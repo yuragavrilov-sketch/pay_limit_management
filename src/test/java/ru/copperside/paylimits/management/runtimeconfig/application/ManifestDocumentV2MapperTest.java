@@ -151,6 +151,47 @@ class ManifestDocumentV2MapperTest {
                 .isEqualTo(canonicalJson.checksum(ManifestDocumentV2Mapper.toDocument(payload)));
     }
 
+    /**
+     * Golden vector — pins the ABSOLUTE canonical bytes and checksum documented in the M1 engine
+     * contract (docs/superpowers/specs/2026-07-07-manifest-v2-schema-M1.md §6) for this exact sample
+     * payload. Any accidental change to {@link ManifestDocumentV2Mapper}, the {@code wire} records, or
+     * the canonical {@link ObjectMapper} configuration in {@link RuntimeManifestCanonicalJson}
+     * (field rename, nesting change, null handling) will change these bytes/checksum and fail this
+     * test loudly — per CLAUDE.md, any canonicalization change requires a conscious
+     * {@code schemaVersion} bump, not a silent drift. If this test fails intentionally (schemaVersion
+     * bumped on purpose), regenerate both this vector and the doc §6 example together.
+     */
+    @Test
+    void goldenCanonicalDocumentAndChecksumMatchDocumentedM1Vector() {
+        String expectedCanonicalJson = "{\"assignments\":[{\"activeFrom\":\"2026-07-01T00:00:00Z\","
+                + "\"activeTo\":null,\"assignmentId\":\"7a3bd1a0-0000-4000-8000-000000000003\","
+                + "\"mode\":\"LIMITED\",\"owner\":{\"id\":null,\"level\":\"GLOBAL\"},"
+                + "\"ruleId\":\"0d9f1c2e-0000-4000-8000-000000000001\"},"
+                + "{\"activeFrom\":\"2026-07-05T00:00:00Z\",\"activeTo\":null,"
+                + "\"assignmentId\":\"7a3bd1a0-0000-4000-8000-000000000002\",\"mode\":\"LIMITED\","
+                + "\"owner\":{\"id\":\"502118\",\"level\":\"MERCHANT\"},"
+                + "\"ruleId\":\"0d9f1c2e-0000-4000-8000-000000000001\"}],"
+                + "\"businessTimezone\":\"Europe/Moscow\",\"effectiveFrom\":\"2026-07-10T00:00:00Z\","
+                + "\"manifestVersion\":42,\"memberships\":[{\"activeFrom\":\"2026-07-10T00:00:00Z\","
+                + "\"activeTo\":null,\"groupId\":\"bbbb2222-0000-4000-8000-000000000006\","
+                + "\"membershipId\":\"c1d2e3f4-0000-4000-8000-000000000004\",\"merchantId\":\"502118\"}],"
+                + "\"operationTypes\":[{\"code\":\"OCT\",\"counterpartyType\":\"CARD\",\"direction\":\"OUT\"}],"
+                + "\"rules\":[{\"attributeSelector\":{\"type\":\"NONE\",\"value\":null},"
+                + "\"code\":\"PAYOUT-CARD-COUNT-DAY\",\"direction\":\"OUT\","
+                + "\"errorMessageTemplate\":\"Limit exceeded: %d of %f (%s)\",\"limitTargetType\":\"CARD\","
+                + "\"limitValue\":\"3\",\"measure\":{\"aggregationScope\":\"TARGET\",\"currency\":null,"
+                + "\"intervalMinutes\":null,\"metric\":\"COUNT\",\"period\":\"DAY\"},"
+                + "\"operationTypes\":[\"OCT\"],\"ruleId\":\"0d9f1c2e-0000-4000-8000-000000000001\","
+                + "\"version\":2}],\"schemaVersion\":2}";
+        String expectedChecksum = "sha256:8546c2090d819572eac60fa59b14da985a07c59644fc93bcdf3abe33db4ae168";
+
+        RuntimeManifestPayload payload = samplePayload();
+        String actualCanonicalJson = new String(canonicalJson.documentBytes(payload), java.nio.charset.StandardCharsets.UTF_8);
+
+        assertThat(actualCanonicalJson).isEqualTo(expectedCanonicalJson);
+        assertThat(canonicalJson.checksum(payload)).isEqualTo(expectedChecksum);
+    }
+
     private JsonNode assignmentById(UUID id) throws Exception {
         for (JsonNode node : document().get("assignments")) {
             if (id.toString().equals(node.get("assignmentId").asText())) {

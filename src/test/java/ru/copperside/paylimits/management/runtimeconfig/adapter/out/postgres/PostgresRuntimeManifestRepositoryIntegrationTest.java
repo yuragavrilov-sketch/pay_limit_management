@@ -74,10 +74,17 @@ class PostgresRuntimeManifestRepositoryIntegrationTest {
                 Instant.parse("2026-05-29T10:15:00Z")
         ));
 
-        assertThat(repository.findManifest(manifest.id())).contains(manifest);
+        RuntimeManifest readBack = repository.findManifest(manifest.id()).orElseThrow();
+        assertThat(readBack).isEqualTo(manifest);
         assertThat(childRows("runtime_manifest_rules", manifest.id())).isEqualTo(1);
         assertThat(childRows("runtime_manifest_assignments", manifest.id())).isEqualTo(1);
         assertThat(childRows("runtime_manifest_memberships", manifest.id())).isEqualTo(1);
+
+        // M1 keystone property: the checksum served with the manifest must be exactly the checksum
+        // recomputable from the manifest's own (round-tripped) payload — not just equal to what was
+        // computed before the DB round-trip (already covered by the `contains(manifest)` equality
+        // above). This pins that the read-back payload itself hashes to the stored checksum.
+        assertThat(canonicalJson.checksum(readBack.payload())).isEqualTo(readBack.checksum());
     }
 
     @Test
