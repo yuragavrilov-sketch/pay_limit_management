@@ -48,9 +48,12 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.hamcrest.Matchers.nullValue;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -124,6 +127,43 @@ class RuntimeManifestControllerTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.id").value(manifest.id().toString()))
                 .andExpect(jsonPath("$.data.effectiveFrom").value("2026-05-29T10:15:00Z"));
+    }
+
+    @Test
+    void returnsNotModifiedWhenIfNoneMatchMatchesEffectiveManifestChecksum() throws Exception {
+        RuntimeManifest manifest = repository.saveCompiledManifest(version -> repository.sampleManifest(
+                version,
+                Instant.parse("2026-05-29T10:15:00Z")
+        ));
+
+        String etag = mockMvc.perform(get("/internal/v1/limit-management/runtime-manifests/effective")
+                        .queryParam("at", "2026-05-29T10:20:00Z"))
+                .andExpect(status().isOk())
+                .andReturn().getResponse().getHeader("ETag");
+
+        assertThat(etag).isEqualTo("\"" + manifest.checksum() + "\"");
+
+        mockMvc.perform(get("/internal/v1/limit-management/runtime-manifests/effective")
+                        .queryParam("at", "2026-05-29T10:20:00Z")
+                        .header("If-None-Match", etag))
+                .andExpect(status().isNotModified())
+                .andExpect(jsonPath("$.data").doesNotExist())
+                .andExpect(content().string(""));
+    }
+
+    @Test
+    void returnsOkWithBodyAndETagWhenIfNoneMatchDoesNotMatch() throws Exception {
+        RuntimeManifest manifest = repository.saveCompiledManifest(version -> repository.sampleManifest(
+                version,
+                Instant.parse("2026-05-29T10:15:00Z")
+        ));
+
+        mockMvc.perform(get("/internal/v1/limit-management/runtime-manifests/effective")
+                        .queryParam("at", "2026-05-29T10:20:00Z")
+                        .header("If-None-Match", "\"sha256:stale\""))
+                .andExpect(status().isOk())
+                .andExpect(header().string("ETag", "\"" + manifest.checksum() + "\""))
+                .andExpect(jsonPath("$.data.id").value(manifest.id().toString()));
     }
 
     @Test

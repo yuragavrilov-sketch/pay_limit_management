@@ -172,6 +172,86 @@ class RuntimeManifestCompilerTest {
     }
 
     @Test
+    void checksumIsStableAcrossReorderedInputCollections() {
+        // MGT-U-06: the manifest checksum only depends on canonical (sorted) content, never on the
+        // order the repository happens to return rules/assignments/memberships/operationTypes in.
+        // Domain objects are constructed once (fixed UUIDs) and fed into two independent repositories
+        // in genuinely different (rotated, not merely reversed) insertion orders.
+        LimitRule ruleA = buildRule("RULE_A", new BigDecimal("1000.00"));
+        LimitRule ruleM = buildRule("RULE_M", new BigDecimal("2000.00"));
+        LimitRule ruleZ = buildRule("RULE_Z", new BigDecimal("3000.00"));
+
+        RuntimeCompiledAssignment assignA = buildAssignment(ruleA, AssignmentOwnerType.MERCHANT, "502118", LimitMode.LIMITED);
+        RuntimeCompiledAssignment assignM = buildAssignment(ruleM, AssignmentOwnerType.MERCHANT, "502119", LimitMode.BLOCKED);
+        RuntimeCompiledAssignment assignZ = buildAssignment(ruleZ, AssignmentOwnerType.MERCHANT, "502120", LimitMode.UNLIMITED);
+
+        RuntimeMerchantGroupMembership memberA = buildMembership("502118");
+        RuntimeMerchantGroupMembership memberM = buildMembership("502119");
+        RuntimeMerchantGroupMembership memberZ = buildMembership("502120");
+
+        RuntimeOperationType opA = new RuntimeOperationType("SBP_B2C", OperationDirection.OUT, CounterpartyType.PHONE);
+        RuntimeOperationType opM = new RuntimeOperationType("SBP_C2B", OperationDirection.IN, CounterpartyType.PHONE);
+        RuntimeOperationType opZ = new RuntimeOperationType("SBP_C2C", OperationDirection.IN, CounterpartyType.PHONE);
+
+        FakeRepository repositoryOne = new FakeRepository();
+        repositoryOne.rules.addAll(List.of(ruleA, ruleM, ruleZ));
+        repositoryOne.assignments.addAll(List.of(assignA, assignM, assignZ));
+        repositoryOne.memberships.addAll(List.of(memberA, memberM, memberZ));
+        repositoryOne.operationTypes.addAll(List.of(opA, opM, opZ));
+
+        FakeRepository repositoryTwo = new FakeRepository();
+        // Rotated (not merely reversed) order for every collection.
+        repositoryTwo.rules.addAll(List.of(ruleZ, ruleA, ruleM));
+        repositoryTwo.assignments.addAll(List.of(assignZ, assignA, assignM));
+        repositoryTwo.memberships.addAll(List.of(memberZ, memberA, memberM));
+        repositoryTwo.operationTypes.addAll(List.of(opZ, opA, opM));
+
+        RuntimeManifestCompiler compilerOne = new RuntimeManifestCompiler(repositoryOne, CLOCK, Duration.ofMinutes(5), "Europe/Moscow");
+        RuntimeManifestCompiler compilerTwo = new RuntimeManifestCompiler(repositoryTwo, CLOCK, Duration.ofMinutes(5), "Europe/Moscow");
+        Instant effectiveFrom = Instant.parse("2026-05-29T10:15:00Z");
+
+        RuntimeManifest manifestOne = compilerOne.compile(effectiveFrom);
+        RuntimeManifest manifestTwo = compilerTwo.compile(effectiveFrom);
+
+        assertThat(manifestOne.checksum()).isEqualTo(manifestTwo.checksum());
+        RuntimeManifestCanonicalJson canonicalJson = new RuntimeManifestCanonicalJson();
+        assertThat(canonicalJson.bytes(manifestOne.payload())).isEqualTo(canonicalJson.bytes(manifestTwo.payload()));
+    }
+
+    @Test
+    void checksumChangesWhenARuleFieldChanges() {
+        // MGT-U-07: changing a single field (limitValue) on one rule, with everything else pinned
+        // identical (same version/createdAt/effectiveFrom), must flip the checksum.
+        LimitRule baseRule = buildRule("RULE_SBP_PHONE_DAY", new BigDecimal("1000.00"));
+        LimitRule changedRule = buildRule("RULE_SBP_PHONE_DAY", new BigDecimal("1000.01"));
+        RuntimeCompiledRule compiledBase = RuntimeManifestCompiler.compileRule(baseRule);
+        RuntimeCompiledRule compiledChanged = RuntimeManifestCompiler.compileRule(changedRule);
+        RuntimeManifestCanonicalJson canonicalJson = new RuntimeManifestCanonicalJson();
+
+        RuntimeManifestPayload base = payload(1, NOW, Instant.parse("2026-05-29T10:15:00Z"), List.of(compiledBase));
+        RuntimeManifestPayload changed = payload(1, NOW, Instant.parse("2026-05-29T10:15:00Z"), List.of(compiledChanged));
+
+        assertThat(canonicalJson.checksum(base)).isNotEqualTo(canonicalJson.checksum(changed));
+    }
+
+    @Test
+    void checksumChangesWhenBusinessTimezoneChanges() {
+        // MGT-U-07 (second field): businessTimezone is part of the v2 canonical payload, so changing
+        // it alone (rules/assignments/memberships/operationTypes/version/createdAt/effectiveFrom all
+        // pinned identical) must also flip the checksum.
+        RuntimeManifestCanonicalJson canonicalJson = new RuntimeManifestCanonicalJson();
+        Instant effectiveFrom = Instant.parse("2026-05-29T10:15:00Z");
+        RuntimeManifestPayload moscow = new RuntimeManifestPayload(
+                2, "Europe/Moscow", List.of(), 1, RuntimeManifestStatus.VALID, NOW, effectiveFrom,
+                0, 0, 0, List.of(), List.of(), List.of(), List.of());
+        RuntimeManifestPayload utc = new RuntimeManifestPayload(
+                2, "UTC", List.of(), 1, RuntimeManifestStatus.VALID, NOW, effectiveFrom,
+                0, 0, 0, List.of(), List.of(), List.of(), List.of());
+
+        assertThat(canonicalJson.checksum(moscow)).isNotEqualTo(canonicalJson.checksum(utc));
+    }
+
+    @Test
     void truncatesChecksumInstantsToPostgresPrecision() {
         Clock subMicroClock = Clock.fixed(Instant.parse("2026-05-29T10:00:00.123456789Z"), ZoneOffset.UTC);
         RuntimeManifestCompiler subMicroCompiler = new RuntimeManifestCompiler(
@@ -314,6 +394,56 @@ class RuntimeManifestCompilerTest {
 
     private static Set<String> orderedSet(String... codes) {
         return new LinkedHashSet<>(java.util.Arrays.asList(codes));
+    }
+
+    private static LimitRule buildRule(String code, BigDecimal limitValue) {
+        return new LimitRule(
+                UUID.randomUUID(),
+                code,
+                1,
+                code,
+                Set.of("SBP_C2B"),
+                OperationDirection.IN,
+                new Measure(RuleMetric.AMOUNT, RulePeriod.DAY, AggregationScope.OWNER, "RUB", null),
+                LimitTargetType.PHONE,
+                limitValue,
+                "template",
+                new RuleSelector<>(AttributeSelectorType.NONE, null),
+                RuleStatus.ACTIVE,
+                Instant.EPOCH,
+                Instant.EPOCH,
+                Instant.EPOCH,
+                null
+        );
+    }
+
+    private static RuntimeCompiledAssignment buildAssignment(
+            LimitRule rule,
+            AssignmentOwnerType ownerType,
+            String ownerId,
+            LimitMode mode
+    ) {
+        return new RuntimeCompiledAssignment(
+                UUID.randomUUID(),
+                rule.id(),
+                rule.code(),
+                ownerType,
+                ownerId,
+                mode,
+                Instant.parse("2026-05-29T00:00:00Z"),
+                null
+        );
+    }
+
+    private static RuntimeMerchantGroupMembership buildMembership(String merchantId) {
+        return new RuntimeMerchantGroupMembership(
+                UUID.randomUUID(),
+                merchantId,
+                UUID.randomUUID(),
+                UUID.randomUUID(),
+                Instant.parse("2026-05-01T00:00:00Z"),
+                null
+        );
     }
 
     private RuntimeManifestPayload payload(int version, Instant createdAt, Instant effectiveFrom, List<RuntimeCompiledRule> rules) {
