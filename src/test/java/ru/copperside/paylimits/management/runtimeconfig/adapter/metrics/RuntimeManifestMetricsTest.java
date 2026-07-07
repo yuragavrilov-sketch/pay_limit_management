@@ -46,6 +46,7 @@ class RuntimeManifestMetricsTest {
         assertThat(sizeGauge(registry, "memberships")).isZero();
         assertThat(sizeGauge(registry, "total")).isZero();
         assertThat(ageGauge(registry)).isZero();
+        assertThat(metrics).isNotNull(); // keep metrics strongly reachable past the gauge reads
     }
 
     @Test
@@ -59,6 +60,7 @@ class RuntimeManifestMetricsTest {
         assertThat(sizeGauge(registry, "assignments")).isEqualTo(5.0);
         assertThat(sizeGauge(registry, "memberships")).isEqualTo(7.0);
         assertThat(sizeGauge(registry, "total")).isEqualTo(15.0);
+        assertThat(metrics).isNotNull(); // keep metrics strongly reachable past the gauge reads
     }
 
     @Test
@@ -72,6 +74,7 @@ class RuntimeManifestMetricsTest {
                 provider(repository), fixedClock(MANIFEST_CREATED_AT.plusSeconds(600)), registry);
 
         assertThat(ageGauge(registry)).isZero();
+        assertThat(metrics).isNotNull(); // keep metrics strongly reachable past the gauge reads
     }
 
     @Test
@@ -84,6 +87,7 @@ class RuntimeManifestMetricsTest {
         RuntimeManifestMetrics metrics = new RuntimeManifestMetrics(provider(repository), fixedClock(now), registry);
 
         assertThat(ageGauge(registry)).isEqualTo(300.0);
+        assertThat(metrics).isNotNull(); // keep metrics strongly reachable past the gauge reads
     }
 
     private static Clock fixedClock(Instant instant) {
