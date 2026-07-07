@@ -1,7 +1,6 @@
 package ru.copperside.paylimits.management.limitassignment.adapter.in.web;
 
 import jakarta.validation.Valid;
-import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -86,7 +85,7 @@ public class LimitAssignmentController {
     public record CreateAssignmentRequest(
             @NotNull UUID ruleId,
             @NotNull AssignmentOwnerType ownerType,
-            @NotBlank String ownerId,
+            String ownerId,
             @NotNull LimitMode limitMode,
             @NotNull Instant validFrom,
             Instant validTo

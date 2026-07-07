@@ -127,6 +127,12 @@ public class LimitAssignmentService {
     }
 
     private String validateOwner(AssignmentOwnerType ownerType, String ownerId) {
+        if (ownerType == AssignmentOwnerType.GLOBAL) {
+            if (ownerId != null && !ownerId.isBlank()) {
+                throw problem("VALIDATION_ERROR", "ownerId must be absent for GLOBAL assignments");
+            }
+            return null;
+        }
         String normalized = requireText(ownerId, "ownerId");
         if (ownerType != AssignmentOwnerType.MERCHANT_GROUP) {
             return normalized;

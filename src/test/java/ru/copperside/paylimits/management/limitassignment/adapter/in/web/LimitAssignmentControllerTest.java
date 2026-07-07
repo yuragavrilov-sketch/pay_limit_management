@@ -23,6 +23,7 @@ import ru.copperside.paylimits.management.limitassignment.domain.RuleReference;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -96,6 +97,39 @@ class LimitAssignmentControllerTest {
                 .andExpect(jsonPath("$.data.validTo").value(nullValue()))
                 .andExpect(jsonPath("$.data.enabled").value(true))
                 .andExpect(jsonPath("$.error").value(nullValue()));
+    }
+
+    @Test
+    void createsGlobalAssignmentWithoutOwnerId() throws Exception {
+        mockMvc.perform(post("/internal/v1/limit-management/assignments")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "ruleId": "0db59f6a-7f8c-45d6-b6a7-cc1fcb397c6e",
+                                  "ownerType": "GLOBAL",
+                                  "limitMode": "LIMITED",
+                                  "validFrom": "2026-05-29T00:00:00Z",
+                                  "validTo": null
+                                }
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.ruleId").value(RULE_ID.toString()))
+                .andExpect(jsonPath("$.data.ownerType").value("GLOBAL"))
+                .andExpect(jsonPath("$.data.ownerId").value(nullValue()))
+                .andExpect(jsonPath("$.data.limitMode").value("LIMITED"))
+                .andExpect(jsonPath("$.error").value(nullValue()));
+    }
+
+    @Test
+    void listsGlobalAssignment() throws Exception {
+        repository.addAssignment(RULE_ID, AssignmentOwnerType.GLOBAL, null,
+                LimitMode.UNLIMITED,
+                Instant.parse("2026-05-29T00:00:00Z"), null, true);
+
+        mockMvc.perform(get("/internal/v1/limit-management/assignments"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data[0].ownerType").value("GLOBAL"))
+                .andExpect(jsonPath("$.data[0].ownerId").value(nullValue()));
     }
 
     @Test
@@ -268,7 +302,7 @@ class LimitAssignmentControllerTest {
                     .filter(assignment -> excludedAssignmentId == null || !assignment.id().equals(excludedAssignmentId))
                     .filter(assignment -> assignment.ruleId().equals(ruleId))
                     .filter(assignment -> assignment.ownerType() == ownerType)
-                    .filter(assignment -> assignment.ownerId().equals(ownerId))
+                    .filter(assignment -> Objects.equals(assignment.ownerId(), ownerId))
                     .anyMatch(assignment -> overlaps(validFrom, validTo, assignment.validFrom(), assignment.validTo()));
         }
 

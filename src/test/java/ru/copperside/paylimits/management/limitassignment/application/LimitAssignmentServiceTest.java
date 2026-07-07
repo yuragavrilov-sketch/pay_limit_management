@@ -15,6 +15,7 @@ import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -83,6 +84,39 @@ class LimitAssignmentServiceTest {
         assertThat(assignment.ownerType()).isEqualTo(AssignmentOwnerType.MERCHANT);
         assertThat(assignment.ownerId()).isEqualTo("502118");
         assertThat(assignment.limitMode()).isEqualTo(LimitMode.UNLIMITED);
+    }
+
+    @Test
+    void createsGlobalAssignmentWithNullOwnerId() {
+        UUID ruleId = repository.addRule(true);
+
+        LimitAssignment assignment = service.createAssignment(new CreateLimitAssignmentCommand(
+                ruleId,
+                AssignmentOwnerType.GLOBAL,
+                null,
+                LimitMode.UNLIMITED,
+                Instant.parse("2026-05-29T12:00:00Z"),
+                null
+        ));
+
+        assertThat(assignment.ownerType()).isEqualTo(AssignmentOwnerType.GLOBAL);
+        assertThat(assignment.ownerId()).isNull();
+    }
+
+    @Test
+    void rejectsGlobalAssignmentWithOwnerIdProvided() {
+        UUID ruleId = repository.addRule(true);
+
+        assertThatThrownBy(() -> service.createAssignment(new CreateLimitAssignmentCommand(
+                ruleId,
+                AssignmentOwnerType.GLOBAL,
+                "502118",
+                LimitMode.UNLIMITED,
+                Instant.parse("2026-05-29T12:00:00Z"),
+                null
+        )))
+                .isInstanceOf(LimitAssignmentProblemException.class)
+                .hasMessageContaining("VALIDATION_ERROR");
     }
 
     @Test
@@ -273,7 +307,7 @@ class LimitAssignmentServiceTest {
                     .filter(assignment -> excludedAssignmentId == null || !assignment.id().equals(excludedAssignmentId))
                     .filter(assignment -> assignment.ruleId().equals(ruleId))
                     .filter(assignment -> assignment.ownerType() == ownerType)
-                    .filter(assignment -> assignment.ownerId().equals(ownerId))
+                    .filter(assignment -> Objects.equals(assignment.ownerId(), ownerId))
                     .anyMatch(assignment -> overlaps(validFrom, validTo, assignment.validFrom(), assignment.validTo()));
         }
 

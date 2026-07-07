@@ -97,6 +97,35 @@ class PostgresLimitAssignmentRepositoryIntegrationTest {
     }
 
     @Test
+    void savesAndReadsBackGlobalAssignmentWithNullOwnerId() {
+        UUID ruleId = insertActiveRule("RULE_ASSIGNMENT_GLOBAL");
+        LimitAssignment assignment = assignment(ruleId, AssignmentOwnerType.GLOBAL, null,
+                LimitMode.LIMITED,
+                Instant.parse("2026-05-29T00:00:00Z"), null, true);
+
+        repository.saveAssignment(assignment);
+
+        assertThat(repository.findAssignment(assignment.id())).hasValueSatisfying(found -> {
+            assertThat(found.ownerType()).isEqualTo(AssignmentOwnerType.GLOBAL);
+            assertThat(found.ownerId()).isNull();
+        });
+    }
+
+    @Test
+    void mapsOverlappingGlobalAssignmentsOfSameRuleToAssignmentConflict() {
+        UUID ruleId = insertActiveRule("RULE_ASSIGNMENT_GLOBAL_OVERLAP");
+        repository.saveAssignment(assignment(ruleId, AssignmentOwnerType.GLOBAL, null,
+                LimitMode.UNLIMITED,
+                Instant.parse("2026-05-29T00:00:00Z"), null, true));
+
+        assertThatThrownBy(() -> repository.saveAssignment(assignment(ruleId, AssignmentOwnerType.GLOBAL, null,
+                LimitMode.BLOCKED,
+                Instant.parse("2026-05-30T00:00:00Z"), null, true)))
+                .isInstanceOf(LimitAssignmentProblemException.class)
+                .hasMessageContaining("ASSIGNMENT_CONFLICT");
+    }
+
+    @Test
     void mapsEnabledOverlapConstraintToAssignmentConflict() {
         UUID ruleId = insertActiveRule("RULE_ASSIGNMENT_OVERLAP_CONSTRAINT");
         repository.saveAssignment(assignment(ruleId, AssignmentOwnerType.MERCHANT, "502118",

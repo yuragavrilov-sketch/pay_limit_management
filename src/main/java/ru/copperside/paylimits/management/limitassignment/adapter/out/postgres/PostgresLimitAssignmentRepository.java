@@ -91,7 +91,7 @@ public class PostgresLimitAssignmentRepository implements LimitAssignmentReposit
                       and (cast(? as uuid) is null or id <> ?)
                       and rule_id = ?
                       and owner_type = ?
-                      and owner_id = ?
+                      and coalesce(owner_id, '') = coalesce(?, '')
                       and tstzrange(valid_from, coalesce(valid_to, 'infinity'::timestamptz), '[)')
                           && tstzrange(?, coalesce(?, 'infinity'::timestamptz), '[)')
                 )
