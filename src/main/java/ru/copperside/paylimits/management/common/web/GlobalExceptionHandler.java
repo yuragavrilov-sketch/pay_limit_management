@@ -85,7 +85,7 @@ public class GlobalExceptionHandler {
     ResponseEntity<ProblemEnvelope> handleRuntimeManifestProblem(RuntimeManifestProblemException ex) {
         HttpStatus status = switch (ex.code()) {
             case "RUNTIME_MANIFEST_NOT_FOUND" -> HttpStatus.NOT_FOUND;
-            case "VALIDATION_ERROR" -> HttpStatus.BAD_REQUEST;
+            case "VALIDATION_ERROR", "RUNTIME_MANIFEST_LEAD_TIME_VIOLATION" -> HttpStatus.BAD_REQUEST;
             default -> HttpStatus.CONFLICT;
         };
         return problem(status, ex.code(), titleForRuntimeManifestProblem(ex.code()), messageWithoutCode(ex), ex.details());

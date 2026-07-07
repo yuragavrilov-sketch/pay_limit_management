@@ -103,7 +103,7 @@ class RuntimeManifestControllerTest {
     }
 
     @Test
-    void mapsLeadTimeViolationToConflictProblem() throws Exception {
+    void mapsLeadTimeViolationToBadRequestProblem() throws Exception {
         mockMvc.perform(post("/internal/v1/limit-management/runtime-manifests")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
@@ -111,8 +111,22 @@ class RuntimeManifestControllerTest {
                                   "effectiveFrom": "2026-05-29T10:01:00Z"
                                 }
                                 """))
-                .andExpect(status().isConflict())
+                .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.error.code").value("RUNTIME_MANIFEST_LEAD_TIME_VIOLATION"));
+    }
+
+    @Test
+    void mgtI10CompilingWithEffectiveFromInThePastReturnsBadRequest() throws Exception {
+        mockMvc.perform(post("/internal/v1/limit-management/runtime-manifests")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "effectiveFrom": "2026-05-29T09:00:00Z"
+                                }
+                                """))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error.code").value("RUNTIME_MANIFEST_LEAD_TIME_VIOLATION"))
+                .andExpect(jsonPath("$.data").doesNotExist());
     }
 
     @Test
