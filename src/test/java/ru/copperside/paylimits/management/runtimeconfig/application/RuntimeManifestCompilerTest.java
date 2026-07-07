@@ -51,11 +51,23 @@ class RuntimeManifestCompilerTest {
 
     private FakeRepository repository;
     private RuntimeManifestCompiler compiler;
+    private ru.copperside.paylimits.management.audit.AuditTestSupport.RecordingAuditEventRepository auditRepository;
 
     @BeforeEach
     void setUp() {
         repository = new FakeRepository();
-        compiler = new RuntimeManifestCompiler(repository, CLOCK, Duration.ofMinutes(5), "Europe/Moscow");
+        auditRepository = new ru.copperside.paylimits.management.audit.AuditTestSupport.RecordingAuditEventRepository();
+        compiler = newCompiler(repository, CLOCK);
+    }
+
+    private RuntimeManifestCompiler newCompiler(RuntimeManifestRepository repo, Clock clock) {
+        return new RuntimeManifestCompiler(
+                repo,
+                clock,
+                Duration.ofMinutes(5),
+                "Europe/Moscow",
+                new ru.copperside.paylimits.management.common.invariant.InvariantTestSupport.PassThroughTransactionRunner(),
+                ru.copperside.paylimits.management.audit.AuditTestSupport.recorder(auditRepository, clock));
     }
 
     @Test
@@ -206,8 +218,8 @@ class RuntimeManifestCompilerTest {
         repositoryTwo.memberships.addAll(List.of(memberZ, memberA, memberM));
         repositoryTwo.operationTypes.addAll(List.of(opZ, opA, opM));
 
-        RuntimeManifestCompiler compilerOne = new RuntimeManifestCompiler(repositoryOne, CLOCK, Duration.ofMinutes(5), "Europe/Moscow");
-        RuntimeManifestCompiler compilerTwo = new RuntimeManifestCompiler(repositoryTwo, CLOCK, Duration.ofMinutes(5), "Europe/Moscow");
+        RuntimeManifestCompiler compilerOne = newCompiler(repositoryOne, CLOCK);
+        RuntimeManifestCompiler compilerTwo = newCompiler(repositoryTwo, CLOCK);
         Instant effectiveFrom = Instant.parse("2026-05-29T10:15:00Z");
 
         RuntimeManifest manifestOne = compilerOne.compile(effectiveFrom);
@@ -254,11 +266,7 @@ class RuntimeManifestCompilerTest {
     @Test
     void truncatesChecksumInstantsToPostgresPrecision() {
         Clock subMicroClock = Clock.fixed(Instant.parse("2026-05-29T10:00:00.123456789Z"), ZoneOffset.UTC);
-        RuntimeManifestCompiler subMicroCompiler = new RuntimeManifestCompiler(
-                repository,
-                subMicroClock,
-                Duration.ofMinutes(5),
-                "Europe/Moscow");
+        RuntimeManifestCompiler subMicroCompiler = newCompiler(repository, subMicroClock);
         Instant effectiveFrom = Instant.parse("2026-05-29T10:15:00.987654321Z");
 
         RuntimeManifest manifest = subMicroCompiler.compile(effectiveFrom);

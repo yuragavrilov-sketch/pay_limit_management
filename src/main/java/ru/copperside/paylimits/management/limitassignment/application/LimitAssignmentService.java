@@ -1,5 +1,6 @@
 package ru.copperside.paylimits.management.limitassignment.application;
 
+import ru.copperside.paylimits.management.audit.application.AuditRecorder;
 import ru.copperside.paylimits.management.common.invariant.LimitKindInvariantChecker;
 import ru.copperside.paylimits.management.common.invariant.port.TransactionRunner;
 import ru.copperside.paylimits.management.limitassignment.application.port.out.LimitAssignmentRepository;
@@ -19,20 +20,25 @@ import java.util.UUID;
 
 public class LimitAssignmentService {
 
+    private static final String ENTITY_ASSIGNMENT = "LIMIT_ASSIGNMENT";
+
     private final LimitAssignmentRepository repository;
     private final LimitKindInvariantChecker invariantChecker;
     private final TransactionRunner transactionRunner;
+    private final AuditRecorder auditRecorder;
     private final Clock clock;
 
     public LimitAssignmentService(
             LimitAssignmentRepository repository,
             LimitKindInvariantChecker invariantChecker,
             TransactionRunner transactionRunner,
+            AuditRecorder auditRecorder,
             Clock clock
     ) {
         this.repository = repository;
         this.invariantChecker = invariantChecker;
         this.transactionRunner = transactionRunner;
+        this.auditRecorder = auditRecorder;
         this.clock = clock;
     }
 
@@ -77,7 +83,9 @@ public class LimitAssignmentService {
                 invariantChecker.checkGroupAssignment(ruleId, UUID.fromString(ownerId), validFrom);
             }
             rejectOverlap(null, ruleId, ownerType, ownerId, validFrom, validTo, true);
-            return repository.saveAssignment(assignment);
+            LimitAssignment saved = repository.saveAssignment(assignment);
+            auditRecorder.record(ENTITY_ASSIGNMENT, saved.id().toString(), "CREATE", null, saved);
+            return saved;
         });
     }
 
@@ -92,7 +100,7 @@ public class LimitAssignmentService {
         validatePeriod(validFrom, validTo);
         rejectOverlap(existing.id(), existing.ruleId(), existing.ownerType(), existing.ownerId(), validFrom, validTo, enabled);
 
-        return repository.updateAssignment(new LimitAssignment(
+        LimitAssignment updated = new LimitAssignment(
                 existing.id(),
                 existing.ruleId(),
                 existing.ownerType(),
@@ -103,13 +111,18 @@ public class LimitAssignmentService {
                 enabled,
                 existing.createdAt(),
                 Instant.now(clock)
-        ));
+        );
+        return transactionRunner.run(() -> {
+            LimitAssignment saved = repository.updateAssignment(updated);
+            auditRecorder.record(ENTITY_ASSIGNMENT, saved.id().toString(), "UPDATE", existing, saved);
+            return saved;
+        });
     }
 
     public LimitAssignment disableAssignment(UUID assignmentId) {
         LimitAssignment existing = repository.findAssignment(requireUuid(assignmentId, "assignmentId"))
                 .orElseThrow(() -> problem("ASSIGNMENT_NOT_FOUND", "Assignment not found"));
-        return repository.updateAssignment(new LimitAssignment(
+        LimitAssignment updated = new LimitAssignment(
                 existing.id(),
                 existing.ruleId(),
                 existing.ownerType(),
@@ -120,7 +133,12 @@ public class LimitAssignmentService {
                 false,
                 existing.createdAt(),
                 Instant.now(clock)
-        ));
+        );
+        return transactionRunner.run(() -> {
+            LimitAssignment saved = repository.updateAssignment(updated);
+            auditRecorder.record(ENTITY_ASSIGNMENT, saved.id().toString(), "DISABLE", existing, saved);
+            return saved;
+        });
     }
 
     private void validateRule(UUID ruleId) {

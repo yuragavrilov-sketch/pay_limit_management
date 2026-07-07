@@ -37,7 +37,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @AutoConfigureMockMvc
 @ActiveProfiles("local")
 @Import({MerchantGroupControllerTest.TestSupport.class,
-        ru.copperside.paylimits.management.audit.OperatorHeaderTestConfig.class})
+        ru.copperside.paylimits.management.audit.OperatorHeaderTestConfig.class,
+        ru.copperside.paylimits.management.audit.AuditWiringTestConfig.class})
 class MerchantGroupControllerTest {
 
     @Autowired
@@ -46,9 +47,13 @@ class MerchantGroupControllerTest {
     @Autowired
     private FakeRepository repository;
 
+    @Autowired
+    private ru.copperside.paylimits.management.audit.AuditTestSupport.RecordingAuditEventRepository auditRepository;
+
     @BeforeEach
     void setUp() {
         repository.clear();
+        auditRepository.clear();
     }
 
     @Test
@@ -209,6 +214,42 @@ class MerchantGroupControllerTest {
                 .andExpect(jsonPath("$.data.validTo").value("2026-05-27T15:00:00Z"));
     }
 
+    // MGT-I-01: creating a group type records exactly one MERCHANT_GROUP_TYPE / CREATE audit event.
+    @Test
+    void writesAuditEventOnGroupTypeCreate() throws Exception {
+        mockMvc.perform(post("/internal/v1/limit-management/merchant-group-types")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                { "code": "risk-tier", "name": "Risk tier", "sortOrder": 10 }
+                                """))
+                .andExpect(status().isOk());
+
+        org.assertj.core.api.Assertions.assertThat(auditRepository.events()).hasSize(1);
+        ru.copperside.paylimits.management.audit.domain.AuditEvent event = auditRepository.events().get(0);
+        org.assertj.core.api.Assertions.assertThat(event.entityType()).isEqualTo("MERCHANT_GROUP_TYPE");
+        org.assertj.core.api.Assertions.assertThat(event.action()).isEqualTo("CREATE");
+        org.assertj.core.api.Assertions.assertThat(event.actorId())
+                .isEqualTo(ru.copperside.paylimits.management.audit.OperatorHeaderTestConfig.OPERATOR_ID);
+        org.assertj.core.api.Assertions.assertThat(event.beforeJson()).isNull();
+        org.assertj.core.api.Assertions.assertThat(event.afterJson()).contains("risk-tier");
+    }
+
+    // MGT-I-14: a group-type create without X-Operator-Id is rejected and writes no audit event.
+    @Test
+    void rejectsGroupTypeCreateWithoutOperatorIdAndWritesNoAudit() throws Exception {
+        mockMvc.perform(post("/internal/v1/limit-management/merchant-group-types")
+                        .header("X-Operator-Id", "")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                { "code": "risk-tier", "name": "Risk tier", "sortOrder": 10 }
+                                """))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error.code").value("OPERATOR_ID_REQUIRED"));
+
+        org.assertj.core.api.Assertions.assertThat(auditRepository.events()).isEmpty();
+        org.assertj.core.api.Assertions.assertThat(repository.listTypes()).isEmpty();
+    }
+
     @TestConfiguration(proxyBeanMethods = false)
     static class TestSupport {
 
@@ -234,9 +275,10 @@ class MerchantGroupControllerTest {
                 FakeRepository repository,
                 ru.copperside.paylimits.management.common.invariant.LimitKindInvariantChecker invariantChecker,
                 ru.copperside.paylimits.management.common.invariant.port.TransactionRunner transactionRunner,
+                ru.copperside.paylimits.management.audit.application.AuditRecorder auditRecorder,
                 java.time.Clock clock
         ) {
-            return new MerchantGroupService(repository, invariantChecker, transactionRunner, clock);
+            return new MerchantGroupService(repository, invariantChecker, transactionRunner, auditRecorder, clock);
         }
     }
 

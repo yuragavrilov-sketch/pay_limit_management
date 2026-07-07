@@ -1,5 +1,6 @@
 package ru.copperside.paylimits.management.merchantgroup.application;
 
+import ru.copperside.paylimits.management.audit.application.AuditRecorder;
 import ru.copperside.paylimits.management.common.invariant.LimitKindInvariantChecker;
 import ru.copperside.paylimits.management.common.invariant.port.TransactionRunner;
 import ru.copperside.paylimits.management.merchantgroup.application.port.out.MerchantGroupRepository;
@@ -16,27 +17,34 @@ import java.util.UUID;
 
 public class MerchantGroupService {
 
+    private static final String ENTITY_GROUP_TYPE = "MERCHANT_GROUP_TYPE";
+    private static final String ENTITY_GROUP = "MERCHANT_GROUP";
+    private static final String ENTITY_MEMBERSHIP = "MERCHANT_GROUP_MEMBERSHIP";
+
     private final MerchantGroupRepository repository;
     private final LimitKindInvariantChecker invariantChecker;
     private final TransactionRunner transactionRunner;
+    private final AuditRecorder auditRecorder;
     private final Clock clock;
 
     public MerchantGroupService(
             MerchantGroupRepository repository,
             LimitKindInvariantChecker invariantChecker,
             TransactionRunner transactionRunner,
+            AuditRecorder auditRecorder,
             Clock clock
     ) {
         this.repository = repository;
         this.invariantChecker = invariantChecker;
         this.transactionRunner = transactionRunner;
+        this.auditRecorder = auditRecorder;
         this.clock = clock;
     }
 
     public MerchantGroupType createType(CreateGroupTypeCommand command) {
         requireCommand(command);
         Instant now = Instant.now(clock);
-        return repository.saveType(new MerchantGroupType(
+        MerchantGroupType type = new MerchantGroupType(
                 UUID.randomUUID(),
                 requireText(command.code(), "code"),
                 requireText(command.name(), "name"),
@@ -45,7 +53,12 @@ public class MerchantGroupService {
                 command.sortOrder(),
                 now,
                 now
-        ));
+        );
+        return transactionRunner.run(() -> {
+            MerchantGroupType saved = repository.saveType(type);
+            auditRecorder.record(ENTITY_GROUP_TYPE, saved.id().toString(), "CREATE", null, saved);
+            return saved;
+        });
     }
 
     public List<MerchantGroupType> listTypes() {
@@ -66,7 +79,11 @@ public class MerchantGroupService {
                 existing.createdAt(),
                 Instant.now(clock)
         );
-        return repository.updateType(updated);
+        return transactionRunner.run(() -> {
+            MerchantGroupType saved = repository.updateType(updated);
+            auditRecorder.record(ENTITY_GROUP_TYPE, saved.id().toString(), "UPDATE", existing, saved);
+            return saved;
+        });
     }
 
     public MerchantGroup createGroup(CreateGroupCommand command) {
@@ -77,7 +94,7 @@ public class MerchantGroupService {
             throw problem("GROUP_TYPE_DISABLED", "Group type is disabled");
         }
         Instant now = Instant.now(clock);
-        return repository.saveGroup(new MerchantGroup(
+        MerchantGroup group = new MerchantGroup(
                 UUID.randomUUID(),
                 type.id(),
                 requireText(command.code(), "code"),
@@ -86,7 +103,12 @@ public class MerchantGroupService {
                 true,
                 now,
                 now
-        ));
+        );
+        return transactionRunner.run(() -> {
+            MerchantGroup saved = repository.saveGroup(group);
+            auditRecorder.record(ENTITY_GROUP, saved.id().toString(), "CREATE", null, saved);
+            return saved;
+        });
     }
 
     public List<MerchantGroup> listGroups(UUID typeId) {
@@ -107,7 +129,11 @@ public class MerchantGroupService {
                 existing.createdAt(),
                 Instant.now(clock)
         );
-        return repository.updateGroup(updated);
+        return transactionRunner.run(() -> {
+            MerchantGroup saved = repository.updateGroup(updated);
+            auditRecorder.record(ENTITY_GROUP, saved.id().toString(), "UPDATE", existing, saved);
+            return saved;
+        });
     }
 
     public MerchantGroupMembership assignMembership(AssignMembershipCommand command) {
@@ -161,9 +187,11 @@ public class MerchantGroupService {
             // otherwise a future-dated, non-overlapping change against a not-yet-closed predecessor
             // membership in a DIFFERENT group produces a false 409.
             invariantChecker.checkMembershipUnderLock(merchantId, group.id(), replacedGroups, validFrom);
-            return overlapping
+            MerchantGroupMembership saved = overlapping
                     .map(existing -> replaceExistingMembership(existing, validFrom, now, actor, membership))
                     .orElseGet(() -> repository.saveMembership(membership));
+            auditRecorder.record(ENTITY_MEMBERSHIP, saved.id().toString(), "ASSIGN_MEMBERSHIP", null, saved);
+            return saved;
         });
     }
 
@@ -192,7 +220,11 @@ public class MerchantGroupService {
         if (!validTo.isAfter(membership.validFrom())) {
             throw problem("INVALID_MEMBERSHIP_PERIOD", "validTo must be after validFrom");
         }
-        return repository.closeMembership(membershipId, validTo, Instant.now(clock), actor);
+        return transactionRunner.run(() -> {
+            MerchantGroupMembership closed = repository.closeMembership(membershipId, validTo, Instant.now(clock), actor);
+            auditRecorder.record(ENTITY_MEMBERSHIP, closed.id().toString(), "CLOSE_MEMBERSHIP", membership, closed);
+            return closed;
+        });
     }
 
     private MerchantGroupMembership replaceExistingMembership(

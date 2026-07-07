@@ -40,6 +40,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @AutoConfigureMockMvc
 @ActiveProfiles("local")
 @Import({LimitAssignmentControllerTest.TestSupport.class,
+        ru.copperside.paylimits.management.audit.AuditWiringTestConfig.class,
         ru.copperside.paylimits.management.audit.OperatorHeaderTestConfig.class})
 class LimitAssignmentControllerTest {
 
@@ -52,11 +53,15 @@ class LimitAssignmentControllerTest {
     @Autowired
     private FakeRepository repository;
 
+    @Autowired
+    private ru.copperside.paylimits.management.audit.AuditTestSupport.RecordingAuditEventRepository auditRepository;
+
     @BeforeEach
     void setUp() {
         repository.clear();
         repository.addRule(RULE_ID, true);
         repository.addMerchantGroup(GROUP_ID, true);
+        auditRepository.clear();
     }
 
     @Test
@@ -222,6 +227,55 @@ class LimitAssignmentControllerTest {
                 .andExpect(jsonPath("$.error.code").value("ASSIGNMENT_CONFLICT"));
     }
 
+    // MGT-I-01: creating an assignment records exactly one LIMIT_ASSIGNMENT / CREATE audit event.
+    @Test
+    void writesAuditEventOnAssignmentCreate() throws Exception {
+        mockMvc.perform(post("/internal/v1/limit-management/assignments")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "ruleId": "0db59f6a-7f8c-45d6-b6a7-cc1fcb397c6e",
+                                  "ownerType": "MERCHANT_GROUP",
+                                  "ownerId": "4bb2ec8a-0cbb-4a42-8e62-7d4bd8567801",
+                                  "limitMode": "LIMITED",
+                                  "validFrom": "2026-05-29T00:00:00Z",
+                                  "validTo": null
+                                }
+                                """))
+                .andExpect(status().isOk());
+
+        org.assertj.core.api.Assertions.assertThat(auditRepository.events()).hasSize(1);
+        ru.copperside.paylimits.management.audit.domain.AuditEvent event = auditRepository.events().get(0);
+        org.assertj.core.api.Assertions.assertThat(event.entityType()).isEqualTo("LIMIT_ASSIGNMENT");
+        org.assertj.core.api.Assertions.assertThat(event.action()).isEqualTo("CREATE");
+        org.assertj.core.api.Assertions.assertThat(event.actorId())
+                .isEqualTo(ru.copperside.paylimits.management.audit.OperatorHeaderTestConfig.OPERATOR_ID);
+        org.assertj.core.api.Assertions.assertThat(event.beforeJson()).isNull();
+        org.assertj.core.api.Assertions.assertThat(event.afterJson()).contains("MERCHANT_GROUP");
+    }
+
+    // MGT-I-14: an assignment create without X-Operator-Id is rejected and writes no audit event.
+    @Test
+    void rejectsAssignmentCreateWithoutOperatorIdAndWritesNoAudit() throws Exception {
+        mockMvc.perform(post("/internal/v1/limit-management/assignments")
+                        .header("X-Operator-Id", "")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "ruleId": "0db59f6a-7f8c-45d6-b6a7-cc1fcb397c6e",
+                                  "ownerType": "GLOBAL",
+                                  "limitMode": "LIMITED",
+                                  "validFrom": "2026-05-29T00:00:00Z",
+                                  "validTo": null
+                                }
+                                """))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error.code").value("OPERATOR_ID_REQUIRED"));
+
+        org.assertj.core.api.Assertions.assertThat(auditRepository.events()).isEmpty();
+        org.assertj.core.api.Assertions.assertThat(repository.listAssignments()).isEmpty();
+    }
+
     @TestConfiguration(proxyBeanMethods = false)
     static class TestSupport {
 
@@ -247,9 +301,10 @@ class LimitAssignmentControllerTest {
                 FakeRepository repository,
                 ru.copperside.paylimits.management.common.invariant.LimitKindInvariantChecker invariantChecker,
                 ru.copperside.paylimits.management.common.invariant.port.TransactionRunner transactionRunner,
+                ru.copperside.paylimits.management.audit.application.AuditRecorder auditRecorder,
                 java.time.Clock clock
         ) {
-            return new LimitAssignmentService(repository, invariantChecker, transactionRunner, clock);
+            return new LimitAssignmentService(repository, invariantChecker, transactionRunner, auditRecorder, clock);
         }
     }
 

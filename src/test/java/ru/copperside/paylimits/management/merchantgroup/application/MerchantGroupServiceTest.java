@@ -33,6 +33,8 @@ class MerchantGroupServiceTest {
                 repository,
                 ru.copperside.paylimits.management.common.invariant.InvariantTestSupport.noOpChecker(),
                 new ru.copperside.paylimits.management.common.invariant.InvariantTestSupport.PassThroughTransactionRunner(),
+                ru.copperside.paylimits.management.audit.AuditTestSupport.recorder(
+                        new ru.copperside.paylimits.management.audit.AuditTestSupport.RecordingAuditEventRepository(), CLOCK),
                 CLOCK);
     }
 

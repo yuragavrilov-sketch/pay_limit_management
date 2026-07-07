@@ -1,8 +1,10 @@
 package ru.copperside.paylimits.management.runtimeconfig.application;
 
+import ru.copperside.paylimits.management.audit.application.AuditRecorder;
 import ru.copperside.paylimits.management.common.invariant.LimitKindConflict;
 import ru.copperside.paylimits.management.common.invariant.LimitKindConflictException;
 import ru.copperside.paylimits.management.common.invariant.LimitKindInvariantChecker;
+import ru.copperside.paylimits.management.common.invariant.port.TransactionRunner;
 import ru.copperside.paylimits.management.common.invariant.LimitKindInvariantChecker.SnapshotGroupAssignment;
 import ru.copperside.paylimits.management.common.invariant.LimitKindInvariantChecker.SnapshotMembership;
 import ru.copperside.paylimits.management.limitassignment.domain.AssignmentOwnerType;
@@ -36,19 +38,26 @@ public class RuntimeManifestCompiler {
 
     public static final int SCHEMA_VERSION = 2;
 
+    private static final String ENTITY_RUNTIME_MANIFEST = "RUNTIME_MANIFEST";
+
     private final RuntimeManifestRepository repository;
     private final Clock clock;
     private final Duration minActivationLeadTime;
     private final String businessTimezone;
+    private final TransactionRunner transactionRunner;
+    private final AuditRecorder auditRecorder;
     private final RuntimeManifestCanonicalJson canonicalJson;
 
     public RuntimeManifestCompiler(
             RuntimeManifestRepository repository,
             Clock clock,
             Duration minActivationLeadTime,
-            String businessTimezone
+            String businessTimezone,
+            TransactionRunner transactionRunner,
+            AuditRecorder auditRecorder
     ) {
-        this(repository, clock, minActivationLeadTime, businessTimezone, new RuntimeManifestCanonicalJson());
+        this(repository, clock, minActivationLeadTime, businessTimezone, transactionRunner, auditRecorder,
+                new RuntimeManifestCanonicalJson());
     }
 
     RuntimeManifestCompiler(
@@ -56,12 +65,16 @@ public class RuntimeManifestCompiler {
             Clock clock,
             Duration minActivationLeadTime,
             String businessTimezone,
+            TransactionRunner transactionRunner,
+            AuditRecorder auditRecorder,
             RuntimeManifestCanonicalJson canonicalJson
     ) {
         this.repository = repository;
         this.clock = clock;
         this.minActivationLeadTime = minActivationLeadTime;
         this.businessTimezone = validateBusinessTimezone(businessTimezone);
+        this.transactionRunner = transactionRunner;
+        this.auditRecorder = auditRecorder;
         this.canonicalJson = canonicalJson;
     }
 
@@ -77,7 +90,16 @@ public class RuntimeManifestCompiler {
         Instant now = canonicalInstant(Instant.now(clock));
         validateEffectiveFrom(effectiveFrom, now);
         Instant canonicalEffectiveFrom = canonicalInstant(effectiveFrom);
-        return repository.saveCompiledManifest(version -> buildManifest(version, now, canonicalEffectiveFrom));
+        // The manifest persist (repository.saveCompiledManifest) is itself @Transactional; wrapping it
+        // in transactionRunner.run makes the persist and the audit append share ONE transaction (the
+        // inner @Transactional joins via default REQUIRED propagation, keeping its LOCK TABLE / version
+        // logic intact), so the manifest row and its audit event commit or roll back together.
+        return transactionRunner.run(() -> {
+            RuntimeManifest manifest = repository.saveCompiledManifest(
+                    version -> buildManifest(version, now, canonicalEffectiveFrom));
+            recordManifestAudit("COMPILE", manifest);
+            return manifest;
+        });
     }
 
     public RuntimeManifest getManifest(UUID id) {
@@ -133,7 +155,29 @@ public class RuntimeManifestCompiler {
         Instant now = canonicalInstant(Instant.now(clock));
         validateEffectiveFrom(effectiveFrom, now);
         Instant canonicalEffectiveFrom = canonicalInstant(effectiveFrom);
-        return repository.saveCompiledManifest(version -> buildRollbackManifest(source, version, now, canonicalEffectiveFrom));
+        return transactionRunner.run(() -> {
+            RuntimeManifest manifest = repository.saveCompiledManifest(
+                    version -> buildRollbackManifest(source, version, now, canonicalEffectiveFrom));
+            recordManifestAudit("ROLLBACK", manifest);
+            return manifest;
+        });
+    }
+
+    /**
+     * Appends the COMPILE/ROLLBACK audit event for a freshly persisted manifest. {@code before} is
+     * always {@code null} (a manifest is immutable and only ever created); {@code after} carries a
+     * compact {@link RuntimeManifestDescriptor} (id/version/checksum/timestamps) rather than the full
+     * payload, keeping the audit row small while still identifying the exact manifest produced.
+     */
+    private void recordManifestAudit(String action, RuntimeManifest manifest) {
+        RuntimeManifestDescriptor descriptor = new RuntimeManifestDescriptor(
+                manifest.id(),
+                manifest.version(),
+                manifest.checksum(),
+                manifest.createdAt(),
+                manifest.effectiveFrom(),
+                null);
+        auditRecorder.record(ENTITY_RUNTIME_MANIFEST, manifest.id().toString(), action, null, descriptor);
     }
 
     public static RuntimeCompiledRule compileRule(LimitRule rule) {

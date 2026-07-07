@@ -66,7 +66,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @AutoConfigureMockMvc
 @ActiveProfiles("local")
 @Import({RuntimeManifestControllerTest.TestSupport.class,
-        ru.copperside.paylimits.management.audit.OperatorHeaderTestConfig.class})
+        ru.copperside.paylimits.management.audit.OperatorHeaderTestConfig.class,
+        ru.copperside.paylimits.management.audit.AuditWiringTestConfig.class})
 class RuntimeManifestControllerTest {
 
     @Autowired
@@ -75,12 +76,16 @@ class RuntimeManifestControllerTest {
     @Autowired
     private FakeRepository repository;
 
+    @Autowired
+    private ru.copperside.paylimits.management.audit.AuditTestSupport.RecordingAuditEventRepository auditRepository;
+
     @BeforeEach
     void setUp() {
         repository.clear();
         LimitRule rule = repository.addActiveRule("RULE_SBP_PHONE_DAY");
         repository.addAssignment(rule.id(), rule.code());
         repository.addMembership("502118");
+        auditRepository.clear();
     }
 
     @Test
@@ -274,6 +279,42 @@ class RuntimeManifestControllerTest {
                 .andExpect(jsonPath("$.data.document.rules[0].code").value("RULE_SBP_PHONE_DAY"));
     }
 
+    // MGT-I-01: compiling a manifest records exactly one RUNTIME_MANIFEST / COMPILE audit event whose
+    // entityId is the new manifest id and whose after-snapshot carries the descriptor (version/checksum).
+    @Test
+    void writesAuditEventOnManifestCompile() throws Exception {
+        mockMvc.perform(post("/internal/v1/limit-management/runtime-manifests")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                { "effectiveFrom": "2026-05-29T10:15:00Z" }
+                                """))
+                .andExpect(status().isOk());
+
+        org.assertj.core.api.Assertions.assertThat(auditRepository.events()).hasSize(1);
+        ru.copperside.paylimits.management.audit.domain.AuditEvent event = auditRepository.events().get(0);
+        org.assertj.core.api.Assertions.assertThat(event.entityType()).isEqualTo("RUNTIME_MANIFEST");
+        org.assertj.core.api.Assertions.assertThat(event.action()).isEqualTo("COMPILE");
+        org.assertj.core.api.Assertions.assertThat(event.actorId())
+                .isEqualTo(ru.copperside.paylimits.management.audit.OperatorHeaderTestConfig.OPERATOR_ID);
+        org.assertj.core.api.Assertions.assertThat(event.beforeJson()).isNull();
+        org.assertj.core.api.Assertions.assertThat(event.afterJson()).contains("checksum");
+    }
+
+    // MGT-I-14: compiling without X-Operator-Id is rejected and writes no audit event.
+    @Test
+    void rejectsManifestCompileWithoutOperatorIdAndWritesNoAudit() throws Exception {
+        mockMvc.perform(post("/internal/v1/limit-management/runtime-manifests")
+                        .header("X-Operator-Id", "")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                { "effectiveFrom": "2026-05-29T10:15:00Z" }
+                                """))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error.code").value("OPERATOR_ID_REQUIRED"));
+
+        org.assertj.core.api.Assertions.assertThat(auditRepository.events()).isEmpty();
+    }
+
     @TestConfiguration(proxyBeanMethods = false)
     static class TestSupport {
 
@@ -289,10 +330,21 @@ class RuntimeManifestControllerTest {
             return new FakeRepository();
         }
 
+        @Bean
+        ru.copperside.paylimits.management.common.invariant.port.TransactionRunner transactionRunner() {
+            return new ru.copperside.paylimits.management.common.invariant.InvariantTestSupport.PassThroughTransactionRunner();
+        }
+
         @Bean("testRuntimeManifestCompiler")
         @Primary
-        RuntimeManifestCompiler runtimeManifestCompiler(FakeRepository repository, Clock clock) {
-            return new RuntimeManifestCompiler(repository, clock, java.time.Duration.ofMinutes(5), "Europe/Moscow");
+        RuntimeManifestCompiler runtimeManifestCompiler(
+                FakeRepository repository,
+                Clock clock,
+                ru.copperside.paylimits.management.common.invariant.port.TransactionRunner transactionRunner,
+                ru.copperside.paylimits.management.audit.application.AuditRecorder auditRecorder
+        ) {
+            return new RuntimeManifestCompiler(
+                    repository, clock, java.time.Duration.ofMinutes(5), "Europe/Moscow", transactionRunner, auditRecorder);
         }
     }
 

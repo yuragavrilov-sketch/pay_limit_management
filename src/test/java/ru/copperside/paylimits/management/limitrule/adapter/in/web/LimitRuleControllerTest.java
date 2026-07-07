@@ -53,7 +53,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @AutoConfigureMockMvc
 @ActiveProfiles("local")
 @Import({LimitRuleControllerTest.TestSupport.class,
-        ru.copperside.paylimits.management.audit.OperatorHeaderTestConfig.class})
+        ru.copperside.paylimits.management.audit.OperatorHeaderTestConfig.class,
+        ru.copperside.paylimits.management.audit.AuditWiringTestConfig.class})
 class LimitRuleControllerTest {
 
     @Autowired
@@ -62,9 +63,13 @@ class LimitRuleControllerTest {
     @Autowired
     private FakeRepository repository;
 
+    @Autowired
+    private ru.copperside.paylimits.management.audit.AuditTestSupport.RecordingAuditEventRepository auditRepository;
+
     @BeforeEach
     void setUp() {
         repository.clear();
+        auditRepository.clear();
     }
 
     @Test
@@ -320,6 +325,84 @@ class LimitRuleControllerTest {
                 .andExpect(jsonPath("$.error.code").value("RULE_NOT_FOUND"));
     }
 
+    // MGT-I-01: a successful rule create writes exactly one audit_event with the request operator
+    // and a CREATE action (before=null, after=snapshot).
+    @Test
+    void writesAuditEventOnRuleCreate() throws Exception {
+        repository.addOperationType("SBP_C2B", OperationDirection.IN, true);
+
+        mockMvc.perform(post("/internal/v1/limit-management/rules")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "code": "RULE_SBP_PHONE_DAY",
+                                  "name": "SBP phone daily amount",
+                                  "operationTypes": ["SBP_C2B"],
+                                  "direction": "IN",
+                                  "measure": { "metric": "AMOUNT", "period": "DAY", "aggregationScope": "OWNER", "currency": "RUB" },
+                                  "limitValue": "1000.00",
+                                  "errorMessageTemplate": "Limit exceeded",
+                                  "attributeSelector": { "type": "NONE", "value": null }
+                                }
+                                """))
+                .andExpect(status().isOk());
+
+        org.assertj.core.api.Assertions.assertThat(auditRepository.events()).hasSize(1);
+        ru.copperside.paylimits.management.audit.domain.AuditEvent event = auditRepository.events().get(0);
+        org.assertj.core.api.Assertions.assertThat(event.entityType()).isEqualTo("LIMIT_RULE");
+        org.assertj.core.api.Assertions.assertThat(event.action()).isEqualTo("CREATE");
+        org.assertj.core.api.Assertions.assertThat(event.actorId())
+                .isEqualTo(ru.copperside.paylimits.management.audit.OperatorHeaderTestConfig.OPERATOR_ID);
+        org.assertj.core.api.Assertions.assertThat(event.actorName())
+                .isEqualTo(ru.copperside.paylimits.management.audit.OperatorHeaderTestConfig.OPERATOR_NAME);
+        org.assertj.core.api.Assertions.assertThat(event.beforeJson()).isNull();
+        org.assertj.core.api.Assertions.assertThat(event.afterJson()).contains("RULE_SBP_PHONE_DAY").contains("DRAFT");
+    }
+
+    // MGT-I-01: activation records an ACTIVATE event carrying both the prior (DRAFT) and new (ACTIVE) state.
+    @Test
+    void writesAuditEventOnRuleActivate() throws Exception {
+        LimitRule draft = repository.addDraftRule("RULE_SBP_C2B_DAY");
+
+        mockMvc.perform(post("/internal/v1/limit-management/rules/{ruleId}/activate", draft.id()))
+                .andExpect(status().isOk());
+
+        org.assertj.core.api.Assertions.assertThat(auditRepository.events()).hasSize(1);
+        ru.copperside.paylimits.management.audit.domain.AuditEvent event = auditRepository.events().get(0);
+        org.assertj.core.api.Assertions.assertThat(event.entityType()).isEqualTo("LIMIT_RULE");
+        org.assertj.core.api.Assertions.assertThat(event.entityId()).isEqualTo(draft.id().toString());
+        org.assertj.core.api.Assertions.assertThat(event.action()).isEqualTo("ACTIVATE");
+        org.assertj.core.api.Assertions.assertThat(event.beforeJson()).contains("DRAFT");
+        org.assertj.core.api.Assertions.assertThat(event.afterJson()).contains("ACTIVE");
+    }
+
+    // MGT-I-14: a mutating request without X-Operator-Id is rejected (400) and writes no audit event.
+    @Test
+    void rejectsRuleCreateWithoutOperatorIdAndWritesNoAudit() throws Exception {
+        repository.addOperationType("SBP_C2B", OperationDirection.IN, true);
+
+        mockMvc.perform(post("/internal/v1/limit-management/rules")
+                        .header("X-Operator-Id", "")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "code": "RULE_NO_OP",
+                                  "name": "no operator",
+                                  "operationTypes": ["SBP_C2B"],
+                                  "direction": "IN",
+                                  "measure": { "metric": "AMOUNT", "period": "DAY", "aggregationScope": "OWNER", "currency": "RUB" },
+                                  "limitValue": "1000.00",
+                                  "errorMessageTemplate": "Limit exceeded",
+                                  "attributeSelector": { "type": "NONE", "value": null }
+                                }
+                                """))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error.code").value("OPERATOR_ID_REQUIRED"));
+
+        org.assertj.core.api.Assertions.assertThat(auditRepository.events()).isEmpty();
+        org.assertj.core.api.Assertions.assertThat(repository.listRules()).isEmpty();
+    }
+
     @TestConfiguration(proxyBeanMethods = false)
     static class TestSupport {
 
@@ -345,9 +428,10 @@ class LimitRuleControllerTest {
                 FakeRepository repository,
                 ru.copperside.paylimits.management.common.invariant.LimitKindInvariantChecker invariantChecker,
                 ru.copperside.paylimits.management.common.invariant.port.TransactionRunner transactionRunner,
+                ru.copperside.paylimits.management.audit.application.AuditRecorder auditRecorder,
                 java.time.Clock clock
         ) {
-            return new LimitRuleService(repository, invariantChecker, transactionRunner, clock);
+            return new LimitRuleService(repository, invariantChecker, transactionRunner, auditRecorder, clock);
         }
     }
 

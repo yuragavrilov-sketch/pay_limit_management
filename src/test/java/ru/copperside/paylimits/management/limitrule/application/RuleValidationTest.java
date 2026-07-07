@@ -42,6 +42,8 @@ class RuleValidationTest {
                 repository,
                 ru.copperside.paylimits.management.common.invariant.InvariantTestSupport.noOpChecker(),
                 new ru.copperside.paylimits.management.common.invariant.InvariantTestSupport.PassThroughTransactionRunner(),
+                ru.copperside.paylimits.management.audit.AuditTestSupport.recorder(
+                        new ru.copperside.paylimits.management.audit.AuditTestSupport.RecordingAuditEventRepository(), Clock.systemUTC()),
                 Clock.systemUTC());
         when(repository.nextVersion(anyString())).thenReturn(1);
         when(repository.findDraftByCode(anyString())).thenReturn(Optional.empty());

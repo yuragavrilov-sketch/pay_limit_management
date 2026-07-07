@@ -1,5 +1,6 @@
 package ru.copperside.paylimits.management.limitrule.application;
 
+import ru.copperside.paylimits.management.audit.application.AuditRecorder;
 import ru.copperside.paylimits.management.common.invariant.LimitKindInvariantChecker;
 import ru.copperside.paylimits.management.common.invariant.port.TransactionRunner;
 import ru.copperside.paylimits.management.limitrule.application.port.out.LimitRuleRepository;
@@ -31,20 +32,26 @@ import java.util.stream.Collectors;
 
 public class LimitRuleService {
 
+    private static final String ENTITY_LIMIT_RULE = "LIMIT_RULE";
+    private static final String ENTITY_OPERATION_TYPE = "OPERATION_TYPE";
+
     private final LimitRuleRepository repository;
     private final LimitKindInvariantChecker invariantChecker;
     private final TransactionRunner transactionRunner;
+    private final AuditRecorder auditRecorder;
     private final Clock clock;
 
     public LimitRuleService(
             LimitRuleRepository repository,
             LimitKindInvariantChecker invariantChecker,
             TransactionRunner transactionRunner,
+            AuditRecorder auditRecorder,
             Clock clock
     ) {
         this.repository = repository;
         this.invariantChecker = invariantChecker;
         this.transactionRunner = transactionRunner;
+        this.auditRecorder = auditRecorder;
         this.clock = clock;
     }
 
@@ -59,7 +66,7 @@ public class LimitRuleService {
     public OperationType createOperationType(CreateOperationTypeCommand command) {
         requireCommand(command);
         Instant now = Instant.now(clock);
-        return repository.saveOperationType(new OperationType(
+        OperationType operationType = new OperationType(
                 UUID.randomUUID(),
                 requireText(command.code(), "code"),
                 requireText(command.name(), "name"),
@@ -70,7 +77,12 @@ public class LimitRuleService {
                 0,
                 now,
                 now
-        ));
+        );
+        return transactionRunner.run(() -> {
+            OperationType saved = repository.saveOperationType(operationType);
+            auditRecorder.record(ENTITY_OPERATION_TYPE, saved.id().toString(), "CREATE", null, saved);
+            return saved;
+        });
     }
 
     public OperationType patchOperationType(UUID id, PatchOperationTypeCommand command) {
@@ -93,7 +105,11 @@ public class LimitRuleService {
                 existing.createdAt(),
                 Instant.now(clock)
         );
-        return repository.updateOperationType(updated);
+        return transactionRunner.run(() -> {
+            OperationType saved = repository.updateOperationType(updated);
+            auditRecorder.record(ENTITY_OPERATION_TYPE, saved.id().toString(), "UPDATE", existing, saved);
+            return saved;
+        });
     }
 
     public List<LimitRule> listRules() {
@@ -133,7 +149,11 @@ public class LimitRuleService {
                 null
         );
         rejectExistingDraft(code);
-        return repository.saveRule(rule);
+        return transactionRunner.run(() -> {
+            LimitRule saved = repository.saveRule(rule);
+            auditRecorder.record(ENTITY_LIMIT_RULE, saved.id().toString(), "CREATE", null, saved);
+            return saved;
+        });
     }
 
     public LimitRule patchRule(UUID id, PatchLimitRuleCommand command) {
@@ -175,7 +195,11 @@ public class LimitRuleService {
                 existing.activatedAt(),
                 existing.disabledAt()
         );
-        return repository.updateRule(updated);
+        return transactionRunner.run(() -> {
+            LimitRule saved = repository.updateRule(updated);
+            auditRecorder.record(ENTITY_LIMIT_RULE, saved.id().toString(), "UPDATE", existing, saved);
+            return saved;
+        });
     }
 
     public LimitRule activateRule(UUID id) {
@@ -213,7 +237,9 @@ public class LimitRuleService {
         // concurrent assignment/activation changes for the same rule.
         return transactionRunner.run(() -> {
             invariantChecker.checkRuleActivation(existing.id(), now);
-            return repository.updateRule(updated);
+            LimitRule saved = repository.updateRule(updated);
+            auditRecorder.record(ENTITY_LIMIT_RULE, saved.id().toString(), "ACTIVATE", existing, saved);
+            return saved;
         });
     }
 
@@ -241,7 +267,11 @@ public class LimitRuleService {
                 existing.activatedAt(),
                 now
         );
-        return repository.updateRule(updated);
+        return transactionRunner.run(() -> {
+            LimitRule saved = repository.updateRule(updated);
+            auditRecorder.record(ENTITY_LIMIT_RULE, saved.id().toString(), "DISABLE", existing, saved);
+            return saved;
+        });
     }
 
     public LimitRule createNewVersion(UUID id) {
@@ -251,7 +281,7 @@ public class LimitRuleService {
         }
         rejectExistingDraft(existing.code());
         Instant now = Instant.now(clock);
-        return repository.saveRule(new LimitRule(
+        LimitRule newVersion = new LimitRule(
                 UUID.randomUUID(),
                 existing.code(),
                 repository.nextVersion(existing.code()),
@@ -268,7 +298,12 @@ public class LimitRuleService {
                 now,
                 null,
                 null
-        ));
+        );
+        return transactionRunner.run(() -> {
+            LimitRule saved = repository.saveRule(newVersion);
+            auditRecorder.record(ENTITY_LIMIT_RULE, saved.id().toString(), "NEW_VERSION", existing, saved);
+            return saved;
+        });
     }
 
     /**
