@@ -122,6 +122,65 @@ order by code asc
 
 ---
 
+## Task 4: переформовка эмишна манифеста под техспеку §4.3 (веха M1 — верный контракт)
+
+Фактический сериализуемый манифест расходится с §4.3 (обёртка `matcher{}`, `version` вместо `manifestVersion`, плоские `ownerType`/`ownerId` вместо `owner{level,id}`, `limitValue` числом). Решение пользователя: переформовать эмишн под §4.3. Вводим отдельный **v2-wire-слой** (§4.3-форма), над которым считается checksum и который сохраняется в `payload_json`/отдаётся engine. Внутренние compiled-записи, логика инварианта (422) и rollback — не трогаем (маппинг только на сериализации).
+
+**Files:**
+- Create: `runtimeconfig/domain/wire/ManifestDocumentV2.java` (+ вложенные `RuleV2`, `MeasureV2`, `AttributeSelectorV2`, `AssignmentV2`, `OwnerV2`, `MembershipV2`, `OperationTypeV2`)
+- Create: `runtimeconfig/application/ManifestDocumentV2Mapper.java` (internal payload → ManifestDocumentV2)
+- Modify: `runtimeconfig/application/RuntimeManifestCanonicalJson.java` (checksum над ManifestDocumentV2, а не над внутренним payload)
+- Modify: `runtimeconfig/application/RuntimeManifestCompiler.java` (checksum считать по документу; строить документ)
+- Modify: `runtimeconfig/adapter/out/postgres/PostgresRuntimeManifestRepository.java` (в `payload_json` писать ManifestDocumentV2)
+- Modify: `runtimeconfig/adapter/in/web/RuntimeManifestResponse.java` (GET отдаёт §4.3-форму — либо возвращать ManifestDocumentV2 напрямую как `document`, либо заменить тело ответа на него)
+- Modify: `docs/superpowers/specs/2026-07-07-manifest-v2-schema-M1.md` (обновить под верную §4.3-форму; убрать раздел «отклонения формы», оставить только attributeSelector-расширение)
+- Test: `RuntimeManifestCanonicalJsonTest`/`RuntimeManifestCompilerTest`, `RuntimeManifestControllerTest`, integration.
+
+**Interfaces (целевая §4.3-форма, над которой считается checksum — БЕЗ поля checksum внутри документа для хеширования; checksum добавляется в ответ отдельно):**
+```
+ManifestDocumentV2(
+  int schemaVersion,            // 2
+  int manifestVersion,          // = внутренний version
+  Instant effectiveFrom,
+  String businessTimezone,
+  List<OperationTypeV2> operationTypes,   // {code, direction, counterpartyType}
+  List<RuleV2> rules,
+  List<AssignmentV2> assignments,
+  List<MembershipV2> memberships
+)
+RuleV2(UUID ruleId, String code, int version, MeasureV2 measure, String limitValue /*toPlainString, null для INTERVAL*/,
+       List<String> operationTypes, String direction, String limitTargetType /*nullable*/,
+       String errorMessageTemplate, AttributeSelectorV2 attributeSelector /*расширение*/)
+MeasureV2(String metric, String period /*nullable*/, String aggregationScope /*nullable*/,
+          String currency /*nullable*/, Integer intervalMinutes /*nullable*/)
+AttributeSelectorV2(String type, String value /*nullable*/)
+AssignmentV2(UUID assignmentId, UUID ruleId, OwnerV2 owner, String mode, Instant activeFrom, Instant activeTo)
+OwnerV2(String level, String id /*nullable/absent для GLOBAL*/)
+MembershipV2(UUID membershipId, UUID groupId, String merchantId, Instant activeFrom, Instant activeTo)
+OperationTypeV2(String code, String direction, String counterpartyType)
+```
+Замечания по маппингу: `manifestVersion` = внутренний `version`; assignment `validFrom/validTo` → `activeFrom/activeTo`, `limitMode` → `mode`, `ownerType/ownerId` → `owner{level,id}` (для GLOBAL `id` = null); membership `validFrom/validTo` → `activeFrom/activeTo`, `groupTypeId` НЕ выводится; `limitValue` — строка через `toPlainString()` (для INTERVAL — null); measure включает currency/intervalMinutes когда заданы (скелет §4.3 показывал только COUNT-пример). Коллекции уже отсортированы компилятором — сохранить порядок при маппинге (детерминизм checksum).
+
+**Interfaces (что меняется):** checksum теперь SHA-256 от канонического JSON `ManifestDocumentV2` (не внутреннего payload). Значение изменится относительно Task 1/2 — это допустимо, v2 ещё не потреблялась engine; `schemaVersion` остаётся 2 (единая v2-схема, финализируем форму до публикации M1).
+
+- [ ] **Step 1: Падающий тест формы** — интеграционный/юнит: скомпилировать манифест, сериализовать документ, проверить §4.3-форму: `manifestVersion` присутствует (нет top-level `version`), правило имеет плоские `operationTypes`/`direction`/`limitTargetType`/`measure`/`limitValue`(строка)/`errorMessageTemplate`/`attributeSelector` (нет `matcher`), назначение имеет `owner{level,id}`/`mode`/`activeFrom`, GLOBAL-назначение → `owner.level=GLOBAL`, `owner.id` отсутствует/null, membership имеет `activeFrom` и не имеет `groupTypeId`, `limitValue` для AMOUNT-правила — строка. Run → FAIL.
+
+- [ ] **Step 2: Wire-DTO** `ManifestDocumentV2` + вложенные records (выше).
+
+- [ ] **Step 3: Маппер** `ManifestDocumentV2Mapper.toDocument(RuntimeManifestPayload)` (или из `RuntimeManifest`) — детерминированный, сохраняет порядок коллекций.
+
+- [ ] **Step 4: Канонизация + checksum над документом** — `RuntimeManifestCanonicalJson.checksum(ManifestDocumentV2)`/`bytes(...)`; компилятор строит документ и считает по нему checksum. `payload_json` = сериализованный документ. Убедиться: Jackson sorted keys, ISO-даты, `NON_NULL`/явные null — согласовать (для стабильности лучше сериализовать null явно; выбрать и зафиксировать поведение, покрыть тестом).
+
+- [ ] **Step 5: GET-ответ** отдаёт §4.3-документ (engine читает именно его). Обновить `RuntimeManifestResponse` (либо вернуть `ManifestDocumentV2` + метаданные lifecycle + checksum). `If-None-Match`/304 и ETag сохранить (Task 2).
+
+- [ ] **Step 6: MGT-U-06/07 переобновить** под checksum-по-документу (стабильность при переупорядоченном входе; отличие при смене поля) — должны остаться зелёными.
+
+- [ ] **Step 7: Обновить M1-документ** `manifest-v2-schema-M1.md` под верную §4.3-форму: убрать «отклонения формы», оставить `attributeSelector` как единственное расширение сверх §4.3; вставить реальный canonical JSON из теста.
+
+- [ ] **Step 8: full suite → GREEN. Commit** `refactor: emit runtime manifest in spec §4.3 shape (v2 wire contract for engine)`.
+
+---
+
 ## DoD этапа 4
 - MGT-I-08 (состав снимка §4.1, checksum сходится), I-10 (effectiveFrom в прошлом → 400), I-11 (пустая конфигурация → валидный манифест), I-12 (rollback), I-13 (If-None-Match → 304) зелёные; MGT-U-06/07 (стабильность checksum) зелёные.
 - Payload содержит `schemaVersion=2`, `businessTimezone`, `operationTypes`, правила полной формы (вкл. attributeSelector), назначения всех уровней.
