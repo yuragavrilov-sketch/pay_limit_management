@@ -56,8 +56,13 @@ public class EffectiveLimitsService {
     private ResolvedLimit resolveKind(List<EffectiveLimitCandidate> candidatesForKind) {
         Comparator<EffectiveLimitCandidate> bySpecificity = Comparator
                 .<EffectiveLimitCandidate>comparingInt(candidate -> levelPriority(candidate.ownerLevel()))
-                // Deterministic tie-break for the (invariant-guarded) edge case of two candidates at
-                // the same level for the same kind — never expected to matter in practice.
+                // Deterministic tie-break when two candidates land at the same level for the same kind.
+                // NOTE: this is NOT invariant-guarded — the non-overlap invariant only checks kinds
+                // delivered by DIFFERENT groups to a shared merchant; it never rejects two MERCHANT-level
+                // (or two GLOBAL-level) assignments of different rules that resolve to the same LimitKind.
+                // In that case one is deterministically chosen as applied and the other is listed under
+                // overrides at the same level. Surfacing same-level duplicates distinctly is a separate,
+                // system-wide decision (see backlog), not handled here.
                 .thenComparing(EffectiveLimitCandidate::ruleCode)
                 .thenComparing(candidate -> candidate.ownerId() == null ? "" : candidate.ownerId());
 
