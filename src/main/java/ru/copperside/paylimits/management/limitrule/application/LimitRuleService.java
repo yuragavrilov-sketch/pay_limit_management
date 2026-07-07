@@ -1,21 +1,33 @@
 package ru.copperside.paylimits.management.limitrule.application;
 
 import ru.copperside.paylimits.management.limitrule.application.port.out.LimitRuleRepository;
+import ru.copperside.paylimits.management.limitrule.domain.AggregationScope;
 import ru.copperside.paylimits.management.limitrule.domain.AttributeSelectorType;
+import ru.copperside.paylimits.management.limitrule.domain.CounterpartyType;
 import ru.copperside.paylimits.management.limitrule.domain.LimitRule;
 import ru.copperside.paylimits.management.limitrule.domain.LimitRuleProblemException;
+import ru.copperside.paylimits.management.limitrule.domain.LimitTargetType;
 import ru.copperside.paylimits.management.limitrule.domain.Measure;
+import ru.copperside.paylimits.management.limitrule.domain.OperationDirection;
 import ru.copperside.paylimits.management.limitrule.domain.OperationType;
 import ru.copperside.paylimits.management.limitrule.domain.RuleDictionaries;
+import ru.copperside.paylimits.management.limitrule.domain.RuleMetric;
+import ru.copperside.paylimits.management.limitrule.domain.RulePeriod;
 import ru.copperside.paylimits.management.limitrule.domain.RuleSelector;
 import ru.copperside.paylimits.management.limitrule.domain.RuleStatus;
 
+import java.math.BigDecimal;
 import java.time.Clock;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Set;
 import java.util.UUID;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
+import java.util.stream.Collectors;
 
 public class LimitRuleService {
 
@@ -87,18 +99,23 @@ public class LimitRuleService {
     public LimitRule createRule(CreateLimitRuleCommand command) {
         requireCommand(command);
         String code = requireText(command.code(), "code");
+        String name = requireText(command.name(), "name");
+        OperationDirection direction = requireEnum(command.direction(), "direction");
+        ValidatedRuleDefinition validated = validateRuleDefinition(
+                command.operationTypes(), direction, command.measure(),
+                command.limitTargetType(), command.limitValue(), command.errorMessageTemplate());
         Instant now = Instant.now(clock);
         LimitRule rule = new LimitRule(
                 UUID.randomUUID(),
                 code,
                 repository.nextVersion(code),
-                requireText(command.name(), "name"),
-                validateOperationTypes(command.operationTypes()),
-                requireEnum(command.direction(), "direction"),
-                requireMeasure(command.measure()),
+                name,
+                validated.operationTypes(),
+                direction,
+                validated.measure(),
                 command.limitTargetType(),
                 command.limitValue(),
-                requireText(command.errorMessageTemplate(), "errorMessageTemplate"),
+                validated.errorMessageTemplate(),
                 validateAttributeSelector(command.attributeSelector()),
                 RuleStatus.DRAFT,
                 now,
@@ -114,24 +131,35 @@ public class LimitRuleService {
         requireCommand(command);
         LimitRule existing = getRule(id);
         requireDraft(existing);
+        String name = command.name() == null ? existing.name() : requireText(command.name(), "name");
+        Set<String> operationTypes = command.operationTypes() == null
+                ? existing.operationTypes() : command.operationTypes();
+        OperationDirection direction = command.direction() == null ? existing.direction() : command.direction();
+        Measure measure = command.measure() == null ? existing.measure() : command.measure();
+        LimitTargetType targetType = command.limitTargetType() == null
+                ? existing.limitTargetType() : command.limitTargetType();
+        BigDecimal limitValue = command.limitValue() == null ? existing.limitValue() : command.limitValue();
+        String template = command.errorMessageTemplate() == null
+                ? existing.errorMessageTemplate() : command.errorMessageTemplate();
+        RuleSelector<AttributeSelectorType> attributeSelector = command.attributeSelector() == null
+                ? existing.attributeSelector()
+                : validateAttributeSelector(command.attributeSelector());
+
+        ValidatedRuleDefinition validated = validateRuleDefinition(
+                operationTypes, direction, measure, targetType, limitValue, template);
+
         LimitRule updated = new LimitRule(
                 existing.id(),
                 existing.code(),
                 existing.version(),
-                command.name() == null ? existing.name() : requireText(command.name(), "name"),
-                command.operationTypes() == null
-                        ? existing.operationTypes()
-                        : validateOperationTypes(command.operationTypes()),
-                command.direction() == null ? existing.direction() : command.direction(),
-                command.measure() == null ? existing.measure() : requireMeasure(command.measure()),
-                command.limitTargetType() == null ? existing.limitTargetType() : command.limitTargetType(),
-                command.limitValue() == null ? existing.limitValue() : command.limitValue(),
-                command.errorMessageTemplate() == null
-                        ? existing.errorMessageTemplate()
-                        : requireText(command.errorMessageTemplate(), "errorMessageTemplate"),
-                command.attributeSelector() == null
-                        ? existing.attributeSelector()
-                        : validateAttributeSelector(command.attributeSelector()),
+                name,
+                validated.operationTypes(),
+                direction,
+                validated.measure(),
+                targetType,
+                limitValue,
+                validated.errorMessageTemplate(),
+                attributeSelector,
                 existing.status(),
                 existing.createdAt(),
                 Instant.now(clock),
@@ -148,6 +176,10 @@ public class LimitRuleService {
                 .ifPresent(rule -> {
                     throw problem("RULE_STATUS_CONFLICT", "Another active rule already exists");
                 });
+        // Closes a review finding: a DRAFT may reference an operation type that was disabled (or
+        // otherwise changed) after the draft was created. Re-resolve at activation time instead of
+        // deferring the discovery to manifest compilation.
+        resolveOperationTypes(existing.operationTypes(), existing.direction());
         Instant now = Instant.now(clock);
         LimitRule updated = new LimitRule(
                 existing.id(),
@@ -224,29 +256,141 @@ public class LimitRuleService {
         ));
     }
 
-    private Set<String> validateOperationTypes(Set<String> operationTypes) {
-        if (operationTypes == null || operationTypes.isEmpty()) {
-            throw problem("VALIDATION_ERROR", "operationTypes must not be empty");
+    /**
+     * Full rule model validation (spec §2.1, validations 1-4) plus the errorMessageTemplate
+     * placeholder check. Resolves and re-validates operationTypes as a side effect, so callers
+     * must not duplicate that resolution.
+     */
+    private ValidatedRuleDefinition validateRuleDefinition(
+            Set<String> operationTypeCodes,
+            OperationDirection direction,
+            Measure measure,
+            LimitTargetType targetType,
+            BigDecimal limitValue,
+            String errorMessageTemplate) {
+        if (operationTypeCodes == null || operationTypeCodes.isEmpty()) {
+            throw problem("VALIDATION_ERROR", "operationTypes must contain at least one code");
         }
-        Set<String> normalized = new LinkedHashSet<>();
-        for (String code : operationTypes) {
+        requireEnum(direction, "direction");
+        if (measure == null) {
+            throw problem("VALIDATION_ERROR", "measure must not be null");
+        }
+        RuleMetric metric = requireEnum(measure.metric(), "measure.metric");
+        RulePeriod period = measure.period();
+        AggregationScope scope = measure.aggregationScope();
+
+        List<OperationType> resolved = resolveOperationTypes(operationTypeCodes, direction);
+
+        // Validation 1: PER_OPERATION => metric=AMOUNT, no aggregationScope, no limitTargetType.
+        if (period == RulePeriod.PER_OPERATION) {
+            if (metric != RuleMetric.AMOUNT) {
+                throw problem("VALIDATION_ERROR", "PER_OPERATION requires metric=AMOUNT");
+            }
+            if (scope != null) {
+                throw problem("VALIDATION_ERROR", "PER_OPERATION must not define aggregationScope");
+            }
+            if (targetType != null) {
+                throw problem("VALIDATION_ERROR", "PER_OPERATION must not define limitTargetType");
+            }
+            if (limitValue == null) {
+                throw problem("VALIDATION_ERROR", "limitValue is required for PER_OPERATION rules");
+            }
+        } else if (metric == RuleMetric.INTERVAL) {
+            // Validation 2: INTERVAL => aggregationScope=TARGET, intervalMinutes > 0, no period/limitValue.
+            if (scope != AggregationScope.TARGET) {
+                throw problem("VALIDATION_ERROR", "INTERVAL requires aggregationScope=TARGET");
+            }
+            if (measure.intervalMinutes() == null || measure.intervalMinutes() <= 0) {
+                throw problem("VALIDATION_ERROR", "INTERVAL requires intervalMinutes > 0");
+            }
+            if (period != null || limitValue != null) {
+                throw problem("VALIDATION_ERROR", "INTERVAL must not define period or limitValue");
+            }
+        } else {
+            // AMOUNT/COUNT with a periodic (non-PER_OPERATION) window need aggregationScope and limitValue.
+            requireEnum(scope, "measure.aggregationScope");
+            if (limitValue == null) {
+                throw problem("VALIDATION_ERROR", "limitValue is required for AMOUNT/COUNT rules");
+            }
+            if (period == null) {
+                throw problem("VALIDATION_ERROR", "period is required for AMOUNT/COUNT rules");
+            }
+        }
+
+        // Validation 4: TARGET scope requires a single counterparty type matching limitTargetType.
+        if (scope == AggregationScope.TARGET) {
+            if (targetType == null) {
+                throw problem("VALIDATION_ERROR", "TARGET scope requires limitTargetType");
+            }
+            Set<CounterpartyType> counterparties = resolved.stream()
+                    .map(OperationType::counterpartyType)
+                    .collect(Collectors.toSet());
+            if (counterparties.size() != 1 || !counterparties.iterator().next().name().equals(targetType.name())) {
+                throw problem("VALIDATION_ERROR",
+                        "TARGET rule operationTypes must share a single counterparty equal to limitTargetType");
+            }
+        }
+
+        // Currency: AMOUNT rules require RUB (normalized on save); other metrics must not define one.
+        String normalizedCurrency = null;
+        if (metric == RuleMetric.AMOUNT) {
+            if (measure.currency() == null || !"RUB".equals(measure.currency().trim().toUpperCase(Locale.ROOT))) {
+                throw problem("VALIDATION_ERROR", "AMOUNT rules require currency=RUB");
+            }
+            normalizedCurrency = measure.currency().trim().toUpperCase(Locale.ROOT);
+        } else if (measure.currency() != null) {
+            throw problem("VALIDATION_ERROR", "currency is only allowed for AMOUNT rules");
+        }
+
+        String normalizedTemplate = validateErrorTemplate(errorMessageTemplate);
+
+        Set<String> normalizedOperationTypes = resolved.stream()
+                .map(OperationType::code)
+                .collect(Collectors.toCollection(LinkedHashSet::new));
+        Measure normalizedMeasure = new Measure(metric, period, scope, normalizedCurrency, measure.intervalMinutes());
+
+        return new ValidatedRuleDefinition(normalizedOperationTypes, normalizedMeasure, normalizedTemplate);
+    }
+
+    /**
+     * Resolves operation type codes and checks each is known, enabled, and matches the rule
+     * direction (validation 3). Also reused by {@link #activateRule} to re-check a draft's
+     * operation types are still valid at activation time.
+     */
+    private List<OperationType> resolveOperationTypes(Set<String> operationTypeCodes, OperationDirection direction) {
+        List<OperationType> resolved = new ArrayList<>();
+        for (String code : operationTypeCodes) {
             String value = requireText(code, "operationTypes");
             OperationType type = repository.findOperationTypeByCode(value)
-                    .orElseThrow(() -> problem("RULE_SELECTOR_INVALID", "Operation type is not available"));
+                    .orElseThrow(() -> problem("RULE_SELECTOR_INVALID", "Operation type is not available: " + value));
             if (!type.enabled()) {
-                throw problem("OPERATION_TYPE_DISABLED", "Operation type is disabled");
+                throw problem("OPERATION_TYPE_DISABLED", "Operation type is disabled: " + type.code());
             }
-            normalized.add(type.code());
+            if (type.direction() != direction) {
+                throw problem("VALIDATION_ERROR",
+                        "operationType " + type.code() + " does not match rule direction");
+            }
+            resolved.add(type);
+        }
+        return resolved;
+    }
+
+    private static final Pattern TEMPLATE_PLACEHOLDER = Pattern.compile("%(.)");
+    private static final Set<String> SUPPORTED_TEMPLATE_PLACEHOLDERS = Set.of("d", "f", "s", "%");
+
+    private String validateErrorTemplate(String template) {
+        String normalized = requireText(template, "errorMessageTemplate");
+        Matcher matcher = TEMPLATE_PLACEHOLDER.matcher(normalized);
+        while (matcher.find()) {
+            String token = matcher.group(1);
+            if (!SUPPORTED_TEMPLATE_PLACEHOLDERS.contains(token)) {
+                throw problem("VALIDATION_ERROR", "errorMessageTemplate contains unsupported placeholder %" + token);
+            }
         }
         return normalized;
     }
 
-    private Measure requireMeasure(Measure measure) {
-        if (measure == null) {
-            throw problem("VALIDATION_ERROR", "measure must not be null");
-        }
-        requireEnum(measure.metric(), "measure.metric");
-        return measure;
+    private record ValidatedRuleDefinition(Set<String> operationTypes, Measure measure, String errorMessageTemplate) {
     }
 
     private RuleSelector<AttributeSelectorType> validateAttributeSelector(RuleSelector<AttributeSelectorType> selector) {

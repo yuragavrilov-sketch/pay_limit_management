@@ -239,19 +239,20 @@ class LimitRuleControllerTest {
     void patchesDraftRule() throws Exception {
         LimitRule draft = repository.addDraftRule("RULE_SBP_C2B_DAY");
 
+        // direction stays IN (matching SBP_C2B) - changing it without updating operationTypes
+        // would now correctly fail validation 3 (operationTypes must match rule direction).
         mockMvc.perform(patch("/internal/v1/limit-management/rules/{ruleId}", draft.id())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {
                                   "name": "Updated monthly count",
-                                  "direction": "OUT",
                                   "measure": { "metric": "COUNT", "period": "MONTH", "aggregationScope": "OWNER" },
                                   "limitValue": "5"
                                 }
                                 """))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.name").value("Updated monthly count"))
-                .andExpect(jsonPath("$.data.direction").value("OUT"))
+                .andExpect(jsonPath("$.data.direction").value("IN"))
                 .andExpect(jsonPath("$.data.measure.metric").value("COUNT"))
                 .andExpect(jsonPath("$.data.measure.period").value("MONTH"))
                 .andExpect(jsonPath("$.data.operationTypes[0]").value("SBP_C2B"));
@@ -349,6 +350,9 @@ class LimitRuleControllerTest {
         }
 
         private LimitRule addRule(String code, int version, RuleStatus status) {
+            if (findOperationTypeByCode("SBP_C2B").isEmpty()) {
+                addOperationType("SBP_C2B", OperationDirection.IN, true);
+            }
             LimitRule rule = new LimitRule(
                     UUID.randomUUID(),
                     code,
