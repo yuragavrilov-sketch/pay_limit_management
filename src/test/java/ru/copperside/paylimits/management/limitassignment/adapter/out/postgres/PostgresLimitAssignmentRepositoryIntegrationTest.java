@@ -48,7 +48,7 @@ class PostgresLimitAssignmentRepositoryIntegrationTest {
     void savesListsAndUpdatesAssignments() {
         UUID ruleId = insertActiveRule("RULE_ASSIGNMENT_SAVE");
         LimitAssignment assignment = assignment(ruleId, AssignmentOwnerType.MERCHANT, "502118",
-                LimitMode.LIMITED, "3000000.00",
+                LimitMode.LIMITED,
                 Instant.parse("2026-05-29T00:00:00Z"), null, true);
 
         repository.saveAssignment(assignment);
@@ -58,7 +58,6 @@ class PostgresLimitAssignmentRepositoryIntegrationTest {
                 assignment.ownerType(),
                 assignment.ownerId(),
                 LimitMode.BLOCKED,
-                null,
                 assignment.validFrom(),
                 assignment.validTo(),
                 false,
@@ -85,7 +84,7 @@ class PostgresLimitAssignmentRepositoryIntegrationTest {
     void detectsEnabledOverlapAndAllowsAdjacentPeriods() {
         UUID ruleId = insertActiveRule("RULE_ASSIGNMENT_OVERLAP_QUERY");
         LimitAssignment first = assignment(ruleId, AssignmentOwnerType.MERCHANT, "502118",
-                LimitMode.UNLIMITED, null,
+                LimitMode.UNLIMITED,
                 Instant.parse("2026-05-29T00:00:00Z"),
                 Instant.parse("2026-05-30T00:00:00Z"),
                 true);
@@ -101,11 +100,11 @@ class PostgresLimitAssignmentRepositoryIntegrationTest {
     void mapsEnabledOverlapConstraintToAssignmentConflict() {
         UUID ruleId = insertActiveRule("RULE_ASSIGNMENT_OVERLAP_CONSTRAINT");
         repository.saveAssignment(assignment(ruleId, AssignmentOwnerType.MERCHANT, "502118",
-                LimitMode.UNLIMITED, null,
+                LimitMode.UNLIMITED,
                 Instant.parse("2026-05-29T00:00:00Z"), null, true));
 
         assertThatThrownBy(() -> repository.saveAssignment(assignment(ruleId, AssignmentOwnerType.MERCHANT, "502118",
-                LimitMode.BLOCKED, null,
+                LimitMode.BLOCKED,
                 Instant.parse("2026-05-30T00:00:00Z"), null, true)))
                 .isInstanceOf(LimitAssignmentProblemException.class)
                 .hasMessageContaining("ASSIGNMENT_CONFLICT");
@@ -154,7 +153,6 @@ class PostgresLimitAssignmentRepositoryIntegrationTest {
             AssignmentOwnerType ownerType,
             String ownerId,
             LimitMode mode,
-            String limitValue,
             Instant validFrom,
             Instant validTo,
             boolean enabled
@@ -165,7 +163,6 @@ class PostgresLimitAssignmentRepositoryIntegrationTest {
                 ownerType,
                 ownerId,
                 mode,
-                limitValue,
                 validFrom,
                 validTo,
                 enabled,

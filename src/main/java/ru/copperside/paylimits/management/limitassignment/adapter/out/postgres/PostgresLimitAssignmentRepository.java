@@ -33,7 +33,7 @@ public class PostgresLimitAssignmentRepository implements LimitAssignmentReposit
     @Override
     public List<LimitAssignment> listAssignments() {
         return jdbcTemplate.query("""
-                select id, rule_id, owner_type, owner_id, limit_mode, limit_value,
+                select id, rule_id, owner_type, owner_id, limit_mode,
                        valid_from, valid_to, enabled, created_at, updated_at
                 from limit_management.limit_assignments
                 order by valid_from desc, created_at desc, id asc
@@ -43,7 +43,7 @@ public class PostgresLimitAssignmentRepository implements LimitAssignmentReposit
     @Override
     public Optional<LimitAssignment> findAssignment(UUID assignmentId) {
         return jdbcTemplate.query("""
-                select id, rule_id, owner_type, owner_id, limit_mode, limit_value,
+                select id, rule_id, owner_type, owner_id, limit_mode,
                        valid_from, valid_to, enabled, created_at, updated_at
                 from limit_management.limit_assignments
                 where id = ?
@@ -111,16 +111,15 @@ public class PostgresLimitAssignmentRepository implements LimitAssignmentReposit
         try {
             jdbcTemplate.update("""
                     insert into limit_management.limit_assignments
-                        (id, rule_id, owner_type, owner_id, limit_mode, limit_value,
+                        (id, rule_id, owner_type, owner_id, limit_mode,
                          valid_from, valid_to, enabled, created_at, updated_at)
-                    values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     assignment.id(),
                     assignment.ruleId(),
                     assignment.ownerType().name(),
                     assignment.ownerId(),
                     assignment.limitMode().name(),
-                    assignment.limitValue(),
                     Timestamp.from(assignment.validFrom()),
                     toTimestamp(assignment.validTo()),
                     assignment.enabled(),
@@ -137,11 +136,10 @@ public class PostgresLimitAssignmentRepository implements LimitAssignmentReposit
         try {
             jdbcTemplate.update("""
                     update limit_management.limit_assignments
-                    set limit_mode = ?, limit_value = ?, valid_from = ?, valid_to = ?, enabled = ?, updated_at = ?
+                    set limit_mode = ?, valid_from = ?, valid_to = ?, enabled = ?, updated_at = ?
                     where id = ?
                     """,
                     assignment.limitMode().name(),
-                    assignment.limitValue(),
                     Timestamp.from(assignment.validFrom()),
                     toTimestamp(assignment.validTo()),
                     assignment.enabled(),
@@ -162,7 +160,6 @@ public class PostgresLimitAssignmentRepository implements LimitAssignmentReposit
                 AssignmentOwnerType.valueOf(rs.getString("owner_type")),
                 rs.getString("owner_id"),
                 LimitMode.valueOf(rs.getString("limit_mode")),
-                rs.getString("limit_value"),
                 rs.getTimestamp("valid_from").toInstant(),
                 validTo == null ? null : validTo.toInstant(),
                 rs.getBoolean("enabled"),

@@ -187,7 +187,6 @@ class MerchantGroupSchemaIntegrationTest {
                         "owner_type",
                         "owner_id",
                         "limit_mode",
-                        "limit_value",
                         "valid_from",
                         "valid_to",
                         "enabled",

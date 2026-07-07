@@ -284,7 +284,6 @@ class RuntimeManifestControllerTest {
                     AssignmentOwnerType.MERCHANT,
                     "502118",
                     LimitMode.LIMITED,
-                    "3000000.00",
                     Instant.parse("2026-05-29T00:00:00Z"),
                     null
             );

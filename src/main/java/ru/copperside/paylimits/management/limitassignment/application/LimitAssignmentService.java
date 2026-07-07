@@ -13,11 +13,8 @@ import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
-import java.util.regex.Pattern;
 
 public class LimitAssignmentService {
-
-    private static final Pattern LIMIT_VALUE_PATTERN = Pattern.compile("^[0-9]+(\\.[0-9]{1,2})?$");
 
     private final LimitAssignmentRepository repository;
     private final Clock clock;
@@ -38,7 +35,6 @@ public class LimitAssignmentService {
         String ownerId = validateOwner(ownerType, command.ownerId());
         validateRule(ruleId);
         LimitMode limitMode = requireEnum(command.limitMode(), "limitMode");
-        String limitValue = validateLimitValue(limitMode, command.limitValue());
         Instant validFrom = requireInstant(command.validFrom(), "validFrom");
         Instant validTo = validatePeriod(validFrom, command.validTo());
         rejectOverlap(null, ruleId, ownerType, ownerId, validFrom, validTo, true);
@@ -50,7 +46,6 @@ public class LimitAssignmentService {
                 ownerType,
                 ownerId,
                 limitMode,
-                limitValue,
                 validFrom,
                 validTo,
                 true,
@@ -64,7 +59,6 @@ public class LimitAssignmentService {
         LimitAssignment existing = repository.findAssignment(requireUuid(assignmentId, "assignmentId"))
                 .orElseThrow(() -> problem("ASSIGNMENT_NOT_FOUND", "Assignment not found"));
         LimitMode limitMode = command.limitMode() == null ? existing.limitMode() : command.limitMode();
-        String limitValue = resolvePatchLimitValue(existing, command, limitMode);
         Instant validFrom = command.validFrom() == null ? existing.validFrom() : command.validFrom();
         Instant validTo = command.validTo() == null ? existing.validTo() : command.validTo();
         boolean enabled = command.enabled() == null ? existing.enabled() : command.enabled();
@@ -77,7 +71,6 @@ public class LimitAssignmentService {
                 existing.ownerType(),
                 existing.ownerId(),
                 limitMode,
-                limitValue,
                 validFrom,
                 validTo,
                 enabled,
@@ -95,25 +88,12 @@ public class LimitAssignmentService {
                 existing.ownerType(),
                 existing.ownerId(),
                 existing.limitMode(),
-                existing.limitValue(),
                 existing.validFrom(),
                 existing.validTo(),
                 false,
                 existing.createdAt(),
                 Instant.now(clock)
         ));
-    }
-
-    private String resolvePatchLimitValue(
-            LimitAssignment existing,
-            PatchLimitAssignmentCommand command,
-            LimitMode limitMode
-    ) {
-        String value = command.limitValue();
-        if (value == null && command.limitMode() == null) {
-            value = existing.limitValue();
-        }
-        return validateLimitValue(limitMode, value);
     }
 
     private void validateRule(UUID ruleId) {
@@ -141,20 +121,6 @@ public class LimitAssignmentService {
             throw problem("GROUP_DISABLED", "Group is disabled");
         }
         return group.id().toString();
-    }
-
-    private String validateLimitValue(LimitMode mode, String value) {
-        if (mode == LimitMode.LIMITED) {
-            String normalized = requireText(value, "limitValue");
-            if (!LIMIT_VALUE_PATTERN.matcher(normalized).matches()) {
-                throw problem("VALIDATION_ERROR", "limitValue must match decimal amount format");
-            }
-            return normalized;
-        }
-        if (value != null) {
-            throw problem("VALIDATION_ERROR", "limitValue must be null for " + mode + " assignments");
-        }
-        return null;
     }
 
     private Instant validatePeriod(Instant validFrom, Instant validTo) {

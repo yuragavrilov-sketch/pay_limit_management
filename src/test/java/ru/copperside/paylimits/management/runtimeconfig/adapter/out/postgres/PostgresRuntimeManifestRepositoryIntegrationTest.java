@@ -148,7 +148,6 @@ class PostgresRuntimeManifestRepositoryIntegrationTest {
                 AssignmentOwnerType.MERCHANT,
                 "502118",
                 LimitMode.LIMITED,
-                "3000000.00",
                 Instant.parse("2026-05-29T00:00:00Z"),
                 null
         ));
@@ -235,9 +234,9 @@ class PostgresRuntimeManifestRepositoryIntegrationTest {
                 """, ruleId);
         jdbcTemplate.update("""
                 insert into limit_management.limit_assignments
-                    (id, rule_id, owner_type, owner_id, limit_mode, limit_value,
+                    (id, rule_id, owner_type, owner_id, limit_mode,
                      valid_from, valid_to, enabled, created_at, updated_at)
-                values (?, ?, 'MERCHANT', '502118', 'LIMITED', '3000000.00',
+                values (?, ?, 'MERCHANT', '502118', 'LIMITED',
                         ?, null, true, now(), now())
                 """, assignmentId, ruleId, Timestamp.from(Instant.parse("2026-05-29T00:00:00Z")));
         jdbcTemplate.update("""

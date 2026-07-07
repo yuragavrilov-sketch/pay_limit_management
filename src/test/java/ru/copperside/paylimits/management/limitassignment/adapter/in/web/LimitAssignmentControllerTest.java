@@ -60,7 +60,7 @@ class LimitAssignmentControllerTest {
     @Test
     void listsAssignments() throws Exception {
         repository.addAssignment(RULE_ID, AssignmentOwnerType.MERCHANT, "502118",
-                LimitMode.UNLIMITED, null,
+                LimitMode.UNLIMITED,
                 Instant.parse("2026-05-29T00:00:00Z"), null, true);
 
         mockMvc.perform(get("/internal/v1/limit-management/assignments"))
@@ -69,7 +69,6 @@ class LimitAssignmentControllerTest {
                 .andExpect(jsonPath("$.data[0].ownerType").value("MERCHANT"))
                 .andExpect(jsonPath("$.data[0].ownerId").value("502118"))
                 .andExpect(jsonPath("$.data[0].limitMode").value("UNLIMITED"))
-                .andExpect(jsonPath("$.data[0].limitValue").value(nullValue()))
                 .andExpect(jsonPath("$.data[0].enabled").value(true))
                 .andExpect(jsonPath("$.error").value(nullValue()));
     }
@@ -84,7 +83,6 @@ class LimitAssignmentControllerTest {
                                   "ownerType": "MERCHANT_GROUP",
                                   "ownerId": "4bb2ec8a-0cbb-4a42-8e62-7d4bd8567801",
                                   "limitMode": "LIMITED",
-                                  "limitValue": "3000000.00",
                                   "validFrom": "2026-05-29T00:00:00Z",
                                   "validTo": null
                                 }
@@ -94,7 +92,6 @@ class LimitAssignmentControllerTest {
                 .andExpect(jsonPath("$.data.ownerType").value("MERCHANT_GROUP"))
                 .andExpect(jsonPath("$.data.ownerId").value(GROUP_ID.toString()))
                 .andExpect(jsonPath("$.data.limitMode").value("LIMITED"))
-                .andExpect(jsonPath("$.data.limitValue").value("3000000.00"))
                 .andExpect(jsonPath("$.data.validFrom").value("2026-05-29T00:00:00Z"))
                 .andExpect(jsonPath("$.data.validTo").value(nullValue()))
                 .andExpect(jsonPath("$.data.enabled").value(true))
@@ -104,7 +101,7 @@ class LimitAssignmentControllerTest {
     @Test
     void patchesAssignment() throws Exception {
         LimitAssignment assignment = repository.addAssignment(RULE_ID, AssignmentOwnerType.MERCHANT, "502118",
-                LimitMode.LIMITED, "3000000.00",
+                LimitMode.LIMITED,
                 Instant.parse("2026-05-29T00:00:00Z"), null, true);
 
         mockMvc.perform(patch("/internal/v1/limit-management/assignments/{assignmentId}", assignment.id())
@@ -112,7 +109,6 @@ class LimitAssignmentControllerTest {
                         .content("""
                                 {
                                   "limitMode": "BLOCKED",
-                                  "limitValue": null,
                                   "validFrom": "2026-05-30T00:00:00Z",
                                   "validTo": null,
                                   "enabled": true
@@ -123,7 +119,6 @@ class LimitAssignmentControllerTest {
                 .andExpect(jsonPath("$.data.ruleId").value(RULE_ID.toString()))
                 .andExpect(jsonPath("$.data.ownerId").value("502118"))
                 .andExpect(jsonPath("$.data.limitMode").value("BLOCKED"))
-                .andExpect(jsonPath("$.data.limitValue").value(nullValue()))
                 .andExpect(jsonPath("$.data.validFrom").value("2026-05-30T00:00:00Z"))
                 .andExpect(jsonPath("$.data.enabled").value(true));
     }
@@ -131,7 +126,7 @@ class LimitAssignmentControllerTest {
     @Test
     void disablesAssignment() throws Exception {
         LimitAssignment assignment = repository.addAssignment(RULE_ID, AssignmentOwnerType.MERCHANT, "502118",
-                LimitMode.UNLIMITED, null,
+                LimitMode.UNLIMITED,
                 Instant.parse("2026-05-29T00:00:00Z"), null, true);
 
         mockMvc.perform(post("/internal/v1/limit-management/assignments/{assignmentId}/disable", assignment.id()))
@@ -143,7 +138,7 @@ class LimitAssignmentControllerTest {
     @Test
     void mapsAssignmentOverlapToConflictProblem() throws Exception {
         repository.addAssignment(RULE_ID, AssignmentOwnerType.MERCHANT, "502118",
-                LimitMode.UNLIMITED, null,
+                LimitMode.UNLIMITED,
                 Instant.parse("2026-05-29T00:00:00Z"), null, true);
 
         mockMvc.perform(post("/internal/v1/limit-management/assignments")
@@ -154,7 +149,6 @@ class LimitAssignmentControllerTest {
                                   "ownerType": "MERCHANT",
                                   "ownerId": "502118",
                                   "limitMode": "BLOCKED",
-                                  "limitValue": null,
                                   "validFrom": "2026-05-30T00:00:00Z",
                                   "validTo": null
                                 }
@@ -205,7 +199,6 @@ class LimitAssignmentControllerTest {
                 AssignmentOwnerType ownerType,
                 String ownerId,
                 LimitMode mode,
-                String limitValue,
                 Instant validFrom,
                 Instant validTo,
                 boolean enabled
@@ -216,7 +209,6 @@ class LimitAssignmentControllerTest {
                     ownerType,
                     ownerId,
                     mode,
-                    limitValue,
                     validFrom,
                     validTo,
                     enabled,

@@ -3,7 +3,6 @@ package ru.copperside.paylimits.management.limitassignment.adapter.in.web;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
-import jakarta.validation.constraints.Pattern;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PatchMapping;
@@ -27,8 +26,6 @@ import java.util.UUID;
 @RestController
 @RequestMapping("/internal/v1/limit-management")
 public class LimitAssignmentController {
-
-    private static final String LIMIT_VALUE_PATTERN = "^[0-9]+(\\.[0-9]{1,2})?$";
 
     private final ObjectProvider<LimitAssignmentService> serviceProvider;
     private final Clock clock;
@@ -55,7 +52,6 @@ public class LimitAssignmentController {
                 request.ownerType(),
                 request.ownerId(),
                 request.limitMode(),
-                request.limitValue(),
                 request.validFrom(),
                 request.validTo()
         ));
@@ -69,7 +65,6 @@ public class LimitAssignmentController {
     ) {
         var assignment = service().patchAssignment(assignmentId, new PatchLimitAssignmentCommand(
                 request.limitMode(),
-                request.limitValue(),
                 request.validFrom(),
                 request.validTo(),
                 request.enabled()
@@ -93,7 +88,6 @@ public class LimitAssignmentController {
             @NotNull AssignmentOwnerType ownerType,
             @NotBlank String ownerId,
             @NotNull LimitMode limitMode,
-            @Pattern(regexp = LIMIT_VALUE_PATTERN) String limitValue,
             @NotNull Instant validFrom,
             Instant validTo
     ) {
@@ -101,7 +95,6 @@ public class LimitAssignmentController {
 
     public record PatchAssignmentRequest(
             LimitMode limitMode,
-            @Pattern(regexp = LIMIT_VALUE_PATTERN) String limitValue,
             Instant validFrom,
             Instant validTo,
             Boolean enabled

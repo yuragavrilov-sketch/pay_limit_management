@@ -78,7 +78,7 @@ public class PostgresRuntimeManifestRepository implements RuntimeManifestReposit
     public List<RuntimeCompiledAssignment> listEnabledAssignmentsForCompilation() {
         return jdbcTemplate.query("""
                 select a.id as assignment_id, a.rule_id, r.code as rule_code,
-                       a.owner_type, a.owner_id, a.limit_mode, a.limit_value,
+                       a.owner_type, a.owner_id, a.limit_mode,
                        a.valid_from, a.valid_to
                 from limit_management.limit_assignments a
                 join limit_management.limit_rules r on r.id = a.rule_id
@@ -340,7 +340,6 @@ public class PostgresRuntimeManifestRepository implements RuntimeManifestReposit
                 AssignmentOwnerType.valueOf(rs.getString("owner_type")),
                 rs.getString("owner_id"),
                 LimitMode.valueOf(rs.getString("limit_mode")),
-                rs.getString("limit_value"),
                 rs.getTimestamp("valid_from").toInstant(),
                 validTo == null ? null : validTo.toInstant()
         );

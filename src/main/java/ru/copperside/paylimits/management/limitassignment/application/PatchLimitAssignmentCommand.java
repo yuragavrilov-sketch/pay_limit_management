@@ -6,7 +6,6 @@ import java.time.Instant;
 
 public record PatchLimitAssignmentCommand(
         LimitMode limitMode,
-        String limitValue,
         Instant validFrom,
         Instant validTo,
         Boolean enabled

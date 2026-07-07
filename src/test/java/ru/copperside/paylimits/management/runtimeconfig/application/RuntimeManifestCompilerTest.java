@@ -60,7 +60,7 @@ class RuntimeManifestCompilerTest {
     void compilesActiveRulesAssignmentsAndMembershipsWithEffectiveFrom() {
         LimitRule rule = repository.addActiveRule("RULE_SBP_PHONE_DAY");
         RuntimeCompiledAssignment assignment = repository.addAssignment(rule.id(), rule.code(), AssignmentOwnerType.MERCHANT,
-                "502118", LimitMode.LIMITED, "3000000.00");
+                "502118", LimitMode.LIMITED);
         RuntimeMerchantGroupMembership membership = repository.addMembership("502118");
         Instant effectiveFrom = Instant.parse("2026-05-29T10:15:00Z");
 
@@ -135,8 +135,8 @@ class RuntimeManifestCompilerTest {
     void sortsPayloadDeterministically() {
         LimitRule second = repository.addActiveRule("RULE_Z");
         LimitRule first = repository.addActiveRule("RULE_A");
-        repository.addAssignment(second.id(), second.code(), AssignmentOwnerType.MERCHANT, "502119", LimitMode.BLOCKED, null);
-        repository.addAssignment(first.id(), first.code(), AssignmentOwnerType.MERCHANT, "502118", LimitMode.UNLIMITED, null);
+        repository.addAssignment(second.id(), second.code(), AssignmentOwnerType.MERCHANT, "502119", LimitMode.BLOCKED);
+        repository.addAssignment(first.id(), first.code(), AssignmentOwnerType.MERCHANT, "502118", LimitMode.UNLIMITED);
         repository.addMembership("502119");
         repository.addMembership("502118");
 
@@ -150,7 +150,7 @@ class RuntimeManifestCompilerTest {
     @Test
     void listsRuntimeManifestLifecycleAtInstant() {
         LimitRule rule = repository.addActiveRule("RULE_SBP_PHONE_DAY");
-        repository.addAssignment(rule.id(), rule.code(), AssignmentOwnerType.MERCHANT, "502118", LimitMode.LIMITED, "3000000.00");
+        repository.addAssignment(rule.id(), rule.code(), AssignmentOwnerType.MERCHANT, "502118", LimitMode.LIMITED);
         RuntimeManifest old = compiler.compile(Instant.parse("2026-05-29T10:15:00Z"));
         RuntimeManifest active = compiler.compile(Instant.parse("2026-05-29T10:30:00Z"));
         RuntimeManifest scheduled = compiler.compile(Instant.parse("2026-05-29T10:45:00Z"));
@@ -168,7 +168,7 @@ class RuntimeManifestCompilerTest {
     @Test
     void rollbackCopiesOldPayloadIntoNewVersionWithNewEffectiveFrom() {
         LimitRule rule = repository.addActiveRule("RULE_SBP_PHONE_DAY");
-        repository.addAssignment(rule.id(), rule.code(), AssignmentOwnerType.MERCHANT, "502118", LimitMode.LIMITED, "3000000.00");
+        repository.addAssignment(rule.id(), rule.code(), AssignmentOwnerType.MERCHANT, "502118", LimitMode.LIMITED);
         RuntimeManifest source = compiler.compile(Instant.parse("2026-05-29T10:15:00Z"));
 
         RuntimeManifest rollback = compiler.rollback(source.id(), Instant.parse("2026-05-29T10:30:00Z"));
@@ -242,8 +242,7 @@ class RuntimeManifestCompilerTest {
                 String ruleCode,
                 AssignmentOwnerType ownerType,
                 String ownerId,
-                LimitMode mode,
-                String limitValue
+                LimitMode mode
         ) {
             RuntimeCompiledAssignment assignment = new RuntimeCompiledAssignment(
                     UUID.randomUUID(),
@@ -252,7 +251,6 @@ class RuntimeManifestCompilerTest {
                     ownerType,
                     ownerId,
                     mode,
-                    limitValue,
                     Instant.parse("2026-05-29T00:00:00Z"),
                     null
             );

@@ -46,7 +46,6 @@ class LimitAssignmentServiceTest {
                 AssignmentOwnerType.MERCHANT_GROUP,
                 groupId.toString(),
                 LimitMode.LIMITED,
-                "3000000.00",
                 validFrom,
                 null
         ));
@@ -56,7 +55,6 @@ class LimitAssignmentServiceTest {
         assertThat(assignment.ownerType()).isEqualTo(AssignmentOwnerType.MERCHANT_GROUP);
         assertThat(assignment.ownerId()).isEqualTo(groupId.toString());
         assertThat(assignment.limitMode()).isEqualTo(LimitMode.LIMITED);
-        assertThat(assignment.limitValue()).isEqualTo("3000000.00");
         assertThat(assignment.validFrom()).isEqualTo(validFrom);
         assertThat(assignment.validTo()).isNull();
         assertThat(assignment.enabled()).isTrue();
@@ -66,7 +64,7 @@ class LimitAssignmentServiceTest {
     }
 
     @Test
-    void createsUnlimitedAssignmentForMerchantWithoutLimitValue() {
+    void createsUnlimitedAssignmentForMerchant() {
         UUID ruleId = repository.addRule(true);
 
         LimitAssignment assignment = service.createAssignment(new CreateLimitAssignmentCommand(
@@ -74,7 +72,6 @@ class LimitAssignmentServiceTest {
                 AssignmentOwnerType.MERCHANT,
                 "502118",
                 LimitMode.UNLIMITED,
-                null,
                 Instant.parse("2026-05-29T12:00:00Z"),
                 null
         ));
@@ -82,7 +79,6 @@ class LimitAssignmentServiceTest {
         assertThat(assignment.ownerType()).isEqualTo(AssignmentOwnerType.MERCHANT);
         assertThat(assignment.ownerId()).isEqualTo("502118");
         assertThat(assignment.limitMode()).isEqualTo(LimitMode.UNLIMITED);
-        assertThat(assignment.limitValue()).isNull();
     }
 
     @Test
@@ -94,7 +90,6 @@ class LimitAssignmentServiceTest {
                 AssignmentOwnerType.MERCHANT,
                 "502118",
                 LimitMode.UNLIMITED,
-                null,
                 Instant.parse("2026-05-29T12:00:00Z"),
                 null
         )))
@@ -112,7 +107,6 @@ class LimitAssignmentServiceTest {
                 AssignmentOwnerType.MERCHANT_GROUP,
                 groupId.toString(),
                 LimitMode.UNLIMITED,
-                null,
                 Instant.parse("2026-05-29T12:00:00Z"),
                 null
         )))
@@ -121,39 +115,10 @@ class LimitAssignmentServiceTest {
     }
 
     @Test
-    void rejectsLimitValueMismatchForMode() {
-        UUID ruleId = repository.addRule(true);
-
-        assertThatThrownBy(() -> service.createAssignment(new CreateLimitAssignmentCommand(
-                ruleId,
-                AssignmentOwnerType.MERCHANT,
-                "502118",
-                LimitMode.LIMITED,
-                null,
-                Instant.parse("2026-05-29T12:00:00Z"),
-                null
-        )))
-                .isInstanceOf(LimitAssignmentProblemException.class)
-                .hasMessageContaining("VALIDATION_ERROR");
-
-        assertThatThrownBy(() -> service.createAssignment(new CreateLimitAssignmentCommand(
-                ruleId,
-                AssignmentOwnerType.MERCHANT,
-                "502118",
-                LimitMode.BLOCKED,
-                "10",
-                Instant.parse("2026-05-29T12:00:00Z"),
-                null
-        )))
-                .isInstanceOf(LimitAssignmentProblemException.class)
-                .hasMessageContaining("VALIDATION_ERROR");
-    }
-
-    @Test
     void rejectsOverlappingEnabledAssignmentForSameRuleAndOwner() {
         UUID ruleId = repository.addRule(true);
         repository.addAssignment(ruleId, AssignmentOwnerType.MERCHANT, "502118",
-                LimitMode.UNLIMITED, null,
+                LimitMode.UNLIMITED,
                 Instant.parse("2026-05-29T12:00:00Z"), null, true);
 
         assertThatThrownBy(() -> service.createAssignment(new CreateLimitAssignmentCommand(
@@ -161,7 +126,6 @@ class LimitAssignmentServiceTest {
                 AssignmentOwnerType.MERCHANT,
                 "502118",
                 LimitMode.BLOCKED,
-                null,
                 Instant.parse("2026-05-30T12:00:00Z"),
                 null
         )))
@@ -173,7 +137,7 @@ class LimitAssignmentServiceTest {
     void allowsAdjacentAssignmentPeriodsForSameRuleAndOwner() {
         UUID ruleId = repository.addRule(true);
         repository.addAssignment(ruleId, AssignmentOwnerType.MERCHANT, "502118",
-                LimitMode.UNLIMITED, null,
+                LimitMode.UNLIMITED,
                 Instant.parse("2026-05-29T12:00:00Z"),
                 Instant.parse("2026-05-30T12:00:00Z"),
                 true);
@@ -183,7 +147,6 @@ class LimitAssignmentServiceTest {
                 AssignmentOwnerType.MERCHANT,
                 "502118",
                 LimitMode.BLOCKED,
-                null,
                 Instant.parse("2026-05-30T12:00:00Z"),
                 null
         ));
@@ -195,12 +158,11 @@ class LimitAssignmentServiceTest {
     void patchesMutableFieldsAndPreservesIdentity() {
         UUID ruleId = repository.addRule(true);
         LimitAssignment existing = repository.addAssignment(ruleId, AssignmentOwnerType.MERCHANT, "502118",
-                LimitMode.LIMITED, "3000000.00",
+                LimitMode.LIMITED,
                 Instant.parse("2026-05-29T12:00:00Z"), null, true);
 
         LimitAssignment patched = service.patchAssignment(existing.id(), new PatchLimitAssignmentCommand(
                 LimitMode.BLOCKED,
-                null,
                 Instant.parse("2026-05-30T12:00:00Z"),
                 null,
                 true
@@ -211,7 +173,6 @@ class LimitAssignmentServiceTest {
         assertThat(patched.ownerType()).isEqualTo(existing.ownerType());
         assertThat(patched.ownerId()).isEqualTo(existing.ownerId());
         assertThat(patched.limitMode()).isEqualTo(LimitMode.BLOCKED);
-        assertThat(patched.limitValue()).isNull();
         assertThat(patched.validFrom()).isEqualTo(Instant.parse("2026-05-30T12:00:00Z"));
         assertThat(patched.enabled()).isTrue();
         assertThat(patched.updatedAt()).isEqualTo(NOW);
@@ -221,7 +182,7 @@ class LimitAssignmentServiceTest {
     void disablesAssignmentWithoutDeletingIt() {
         UUID ruleId = repository.addRule(true);
         LimitAssignment existing = repository.addAssignment(ruleId, AssignmentOwnerType.MERCHANT, "502118",
-                LimitMode.UNLIMITED, null,
+                LimitMode.UNLIMITED,
                 Instant.parse("2026-05-29T12:00:00Z"), null, true);
 
         LimitAssignment disabled = service.disableAssignment(existing.id());
@@ -254,7 +215,6 @@ class LimitAssignmentServiceTest {
                 AssignmentOwnerType ownerType,
                 String ownerId,
                 LimitMode mode,
-                String limitValue,
                 Instant validFrom,
                 Instant validTo,
                 boolean enabled
@@ -265,7 +225,6 @@ class LimitAssignmentServiceTest {
                     ownerType,
                     ownerId,
                     mode,
-                    limitValue,
                     validFrom,
                     validTo,
                     enabled,

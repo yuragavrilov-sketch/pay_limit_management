@@ -11,7 +11,6 @@ public record CreateLimitAssignmentCommand(
         AssignmentOwnerType ownerType,
         String ownerId,
         LimitMode limitMode,
-        String limitValue,
         Instant validFrom,
         Instant validTo
 ) {

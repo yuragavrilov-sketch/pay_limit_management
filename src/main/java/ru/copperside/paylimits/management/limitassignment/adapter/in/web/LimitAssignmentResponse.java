@@ -11,7 +11,6 @@ public record LimitAssignmentResponse(
         String ownerType,
         String ownerId,
         String limitMode,
-        String limitValue,
         Instant validFrom,
         Instant validTo,
         boolean enabled
@@ -23,7 +22,6 @@ public record LimitAssignmentResponse(
                 assignment.ownerType().name(),
                 assignment.ownerId(),
                 assignment.limitMode().name(),
-                assignment.limitValue(),
                 assignment.validFrom(),
                 assignment.validTo(),
                 assignment.enabled()
