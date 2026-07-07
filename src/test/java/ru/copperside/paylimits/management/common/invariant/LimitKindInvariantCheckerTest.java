@@ -1,0 +1,162 @@
+package ru.copperside.paylimits.management.common.invariant;
+
+import org.junit.jupiter.api.Test;
+import ru.copperside.paylimits.management.common.invariant.port.LimitKindInvariantRepository;
+import ru.copperside.paylimits.management.common.invariant.port.LimitKindInvariantRepository.MerchantGroupKind;
+import ru.copperside.paylimits.management.limitrule.domain.LimitKind;
+import ru.copperside.paylimits.management.limitrule.domain.LimitTargetType;
+import ru.copperside.paylimits.management.limitrule.domain.OperationDirection;
+import ru.copperside.paylimits.management.limitrule.domain.RuleMetric;
+import ru.copperside.paylimits.management.limitrule.domain.RulePeriod;
+
+import java.time.Instant;
+import java.util.List;
+import java.util.Optional;
+import java.util.Set;
+import java.util.UUID;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatCode;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.assertj.core.api.Assertions.catchThrowableOfType;
+import static org.mockito.Mockito.any;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
+
+class LimitKindInvariantCheckerTest {
+
+    private static final Instant AT = Instant.parse("2026-07-07T09:00:00Z");
+
+    private static final LimitKind COUNT_DAY_PHONE_IN =
+            new LimitKind(RuleMetric.COUNT, RulePeriod.DAY, LimitTargetType.PHONE, OperationDirection.IN, Set.of("SBP_C2B"));
+    private static final LimitKind DISJOINT_AMOUNT_MONTH =
+            new LimitKind(RuleMetric.AMOUNT, RulePeriod.MONTH, LimitTargetType.ACCOUNT, OperationDirection.OUT, Set.of("SBP_B2C"));
+
+    private final LimitKindInvariantRepository repository = mock(LimitKindInvariantRepository.class);
+    private final LimitKindInvariantChecker checker = new LimitKindInvariantChecker(repository);
+
+    // ---- membership (checkpoint a) ----
+
+    @Test
+    void membershipConflictThrowsWithMerchantExistingAndRequestedIds() {
+        String merchantId = "502118";
+        UUID requestedGroup = UUID.randomUUID();
+        UUID otherGroup = UUID.randomUUID();
+        when(repository.kindsDeliveredByGroup(requestedGroup)).thenReturn(List.of(COUNT_DAY_PHONE_IN));
+        when(repository.kindsReceivedByMerchantExcludingGroup(merchantId, requestedGroup, AT))
+                .thenReturn(List.of(new MerchantGroupKind(otherGroup, COUNT_DAY_PHONE_IN)));
+
+        LimitKindConflictException ex = catchThrowableOfType(
+                () -> checker.checkMembership(merchantId, requestedGroup, AT), LimitKindConflictException.class);
+
+        assertThat(ex).isNotNull();
+        assertThat(ex.compilation()).isFalse();
+        assertThat(ex.conflicts()).singleElement().satisfies(conflict -> {
+            assertThat(conflict.merchantId()).isEqualTo(merchantId);
+            assertThat(conflict.existingGroupId()).isEqualTo(otherGroup);
+            assertThat(conflict.requestedGroupId()).isEqualTo(requestedGroup);
+            assertThat(conflict.limitKind().checkType()).isEqualTo("COUNT_DAY");
+        });
+        verify(repository).lockMerchant(merchantId);
+    }
+
+    @Test
+    void membershipWithDisjointKindsDoesNotThrow() {
+        String merchantId = "502118";
+        UUID requestedGroup = UUID.randomUUID();
+        UUID otherGroup = UUID.randomUUID();
+        when(repository.kindsDeliveredByGroup(requestedGroup)).thenReturn(List.of(COUNT_DAY_PHONE_IN));
+        when(repository.kindsReceivedByMerchantExcludingGroup(merchantId, requestedGroup, AT))
+                .thenReturn(List.of(new MerchantGroupKind(otherGroup, DISJOINT_AMOUNT_MONTH)));
+
+        assertThatCode(() -> checker.checkMembership(merchantId, requestedGroup, AT)).doesNotThrowAnyException();
+        verify(repository).lockMerchant(merchantId);
+    }
+
+    @Test
+    void membershipShortCircuitsWhenGroupDeliversNoKinds() {
+        String merchantId = "502118";
+        UUID requestedGroup = UUID.randomUUID();
+        when(repository.kindsDeliveredByGroup(requestedGroup)).thenReturn(List.of());
+
+        assertThatCode(() -> checker.checkMembership(merchantId, requestedGroup, AT)).doesNotThrowAnyException();
+        verify(repository).lockMerchant(merchantId);
+    }
+
+    // ---- group assignment (checkpoint b) ----
+
+    @Test
+    void groupAssignmentConflictThrowsForEachAffectedMember() {
+        UUID ruleId = UUID.randomUUID();
+        UUID groupId = UUID.randomUUID();
+        UUID otherGroup = UUID.randomUUID();
+        when(repository.kindOfRule(ruleId)).thenReturn(Optional.of(COUNT_DAY_PHONE_IN));
+        when(repository.membersOfGroup(groupId, AT)).thenReturn(List.of("502118"));
+        when(repository.kindsReceivedByMerchantExcludingGroup("502118", groupId, AT))
+                .thenReturn(List.of(new MerchantGroupKind(otherGroup, COUNT_DAY_PHONE_IN)));
+
+        LimitKindConflictException ex = catchThrowableOfType(
+                () -> checker.checkGroupAssignment(ruleId, groupId, AT), LimitKindConflictException.class);
+
+        assertThat(ex).isNotNull();
+        assertThat(ex.conflicts()).singleElement().satisfies(conflict -> {
+            assertThat(conflict.merchantId()).isEqualTo("502118");
+            assertThat(conflict.existingGroupId()).isEqualTo(otherGroup);
+            assertThat(conflict.requestedGroupId()).isEqualTo(groupId);
+        });
+        verify(repository).lockRule(ruleId);
+    }
+
+    @Test
+    void groupAssignmentWithDisjointMemberKindsDoesNotThrow() {
+        UUID ruleId = UUID.randomUUID();
+        UUID groupId = UUID.randomUUID();
+        when(repository.kindOfRule(ruleId)).thenReturn(Optional.of(COUNT_DAY_PHONE_IN));
+        when(repository.membersOfGroup(groupId, AT)).thenReturn(List.of("502118"));
+        when(repository.kindsReceivedByMerchantExcludingGroup("502118", groupId, AT))
+                .thenReturn(List.of(new MerchantGroupKind(UUID.randomUUID(), DISJOINT_AMOUNT_MONTH)));
+
+        assertThatCode(() -> checker.checkGroupAssignment(ruleId, groupId, AT)).doesNotThrowAnyException();
+        verify(repository).lockRule(ruleId);
+    }
+
+    @Test
+    void groupAssignmentShortCircuitsWhenRuleMissing() {
+        UUID ruleId = UUID.randomUUID();
+        UUID groupId = UUID.randomUUID();
+        when(repository.kindOfRule(ruleId)).thenReturn(Optional.empty());
+
+        assertThatCode(() -> checker.checkGroupAssignment(ruleId, groupId, AT)).doesNotThrowAnyException();
+        verify(repository).lockRule(ruleId);
+    }
+
+    // ---- rule activation (checkpoint c) ----
+
+    @Test
+    void ruleActivationConflictAcrossItsGroupsThrows() {
+        UUID ruleId = UUID.randomUUID();
+        UUID assignedGroup = UUID.randomUUID();
+        UUID otherGroup = UUID.randomUUID();
+        when(repository.kindOfRule(ruleId)).thenReturn(Optional.of(COUNT_DAY_PHONE_IN));
+        when(repository.groupsWithEnabledAssignmentForRule(ruleId)).thenReturn(List.of(assignedGroup));
+        when(repository.membersOfGroup(assignedGroup, AT)).thenReturn(List.of("502118"));
+        when(repository.kindsReceivedByMerchantExcludingGroup("502118", assignedGroup, AT))
+                .thenReturn(List.of(new MerchantGroupKind(otherGroup, COUNT_DAY_PHONE_IN)));
+
+        assertThatThrownBy(() -> checker.checkRuleActivation(ruleId, AT))
+                .isInstanceOf(LimitKindConflictException.class);
+        verify(repository).lockRule(ruleId);
+    }
+
+    @Test
+    void ruleActivationWithoutGroupAssignmentsDoesNotThrow() {
+        UUID ruleId = UUID.randomUUID();
+        when(repository.kindOfRule(ruleId)).thenReturn(Optional.of(COUNT_DAY_PHONE_IN));
+        when(repository.groupsWithEnabledAssignmentForRule(ruleId)).thenReturn(List.of());
+
+        assertThatCode(() -> checker.checkRuleActivation(ruleId, AT)).doesNotThrowAnyException();
+        verify(repository).lockRule(ruleId);
+        verify(repository, org.mockito.Mockito.never()).membersOfGroup(any(), any());
+    }
+}

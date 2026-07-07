@@ -32,7 +32,11 @@ class LimitAssignmentServiceTest {
     @BeforeEach
     void setUp() {
         repository = new FakeRepository();
-        service = new LimitAssignmentService(repository, CLOCK);
+        service = new LimitAssignmentService(
+                repository,
+                ru.copperside.paylimits.management.common.invariant.InvariantTestSupport.noOpChecker(),
+                new ru.copperside.paylimits.management.common.invariant.InvariantTestSupport.PassThroughTransactionRunner(),
+                CLOCK);
     }
 
     @Test

@@ -218,9 +218,24 @@ class MerchantGroupControllerTest {
         }
 
         @Bean
+        ru.copperside.paylimits.management.common.invariant.LimitKindInvariantChecker limitKindInvariantChecker() {
+            return ru.copperside.paylimits.management.common.invariant.InvariantTestSupport.noOpChecker();
+        }
+
+        @Bean
+        ru.copperside.paylimits.management.common.invariant.port.TransactionRunner transactionRunner() {
+            return new ru.copperside.paylimits.management.common.invariant.InvariantTestSupport.PassThroughTransactionRunner();
+        }
+
+        @Bean
         @Primary
-        MerchantGroupService merchantGroupService(FakeRepository repository, java.time.Clock clock) {
-            return new MerchantGroupService(repository, clock);
+        MerchantGroupService merchantGroupService(
+                FakeRepository repository,
+                ru.copperside.paylimits.management.common.invariant.LimitKindInvariantChecker invariantChecker,
+                ru.copperside.paylimits.management.common.invariant.port.TransactionRunner transactionRunner,
+                java.time.Clock clock
+        ) {
+            return new MerchantGroupService(repository, invariantChecker, transactionRunner, clock);
         }
     }
 

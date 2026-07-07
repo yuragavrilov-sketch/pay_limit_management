@@ -1,5 +1,7 @@
 package ru.copperside.paylimits.management.limitrule.application;
 
+import ru.copperside.paylimits.management.common.invariant.LimitKindInvariantChecker;
+import ru.copperside.paylimits.management.common.invariant.port.TransactionRunner;
 import ru.copperside.paylimits.management.limitrule.application.port.out.LimitRuleRepository;
 import ru.copperside.paylimits.management.limitrule.domain.AggregationScope;
 import ru.copperside.paylimits.management.limitrule.domain.AttributeSelectorType;
@@ -30,10 +32,19 @@ import java.util.stream.Collectors;
 public class LimitRuleService {
 
     private final LimitRuleRepository repository;
+    private final LimitKindInvariantChecker invariantChecker;
+    private final TransactionRunner transactionRunner;
     private final Clock clock;
 
-    public LimitRuleService(LimitRuleRepository repository, Clock clock) {
+    public LimitRuleService(
+            LimitRuleRepository repository,
+            LimitKindInvariantChecker invariantChecker,
+            TransactionRunner transactionRunner,
+            Clock clock
+    ) {
         this.repository = repository;
+        this.invariantChecker = invariantChecker;
+        this.transactionRunner = transactionRunner;
         this.clock = clock;
     }
 
@@ -197,7 +208,13 @@ public class LimitRuleService {
                 now,
                 existing.disabledAt()
         );
-        return repository.updateRule(updated);
+        // Lock (by rule), the non-overlap invariant check across the rule's group assignments, and
+        // the status write share a single transaction so the advisory lock actually serializes
+        // concurrent assignment/activation changes for the same rule.
+        return transactionRunner.run(() -> {
+            invariantChecker.checkRuleActivation(existing.id(), now);
+            return repository.updateRule(updated);
+        });
     }
 
     public LimitRule disableRule(UUID id) {

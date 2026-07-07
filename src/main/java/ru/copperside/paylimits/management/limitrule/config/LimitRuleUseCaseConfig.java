@@ -3,6 +3,8 @@ package ru.copperside.paylimits.management.limitrule.config;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import ru.copperside.paylimits.management.common.invariant.LimitKindInvariantChecker;
+import ru.copperside.paylimits.management.common.invariant.port.TransactionRunner;
 import ru.copperside.paylimits.management.limitrule.application.LimitRuleService;
 import ru.copperside.paylimits.management.limitrule.application.port.out.LimitRuleRepository;
 
@@ -13,7 +15,12 @@ public class LimitRuleUseCaseConfig {
 
     @Bean
     @ConditionalOnBean(LimitRuleRepository.class)
-    LimitRuleService limitRuleService(LimitRuleRepository repository, Clock clock) {
-        return new LimitRuleService(repository, clock);
+    LimitRuleService limitRuleService(
+            LimitRuleRepository repository,
+            LimitKindInvariantChecker invariantChecker,
+            TransactionRunner transactionRunner,
+            Clock clock
+    ) {
+        return new LimitRuleService(repository, invariantChecker, transactionRunner, clock);
     }
 }

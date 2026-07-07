@@ -38,7 +38,11 @@ class RuleValidationTest {
     @BeforeEach
     void setUp() {
         repository = mock(LimitRuleRepository.class);
-        service = new LimitRuleService(repository, Clock.systemUTC());
+        service = new LimitRuleService(
+                repository,
+                ru.copperside.paylimits.management.common.invariant.InvariantTestSupport.noOpChecker(),
+                new ru.copperside.paylimits.management.common.invariant.InvariantTestSupport.PassThroughTransactionRunner(),
+                Clock.systemUTC());
         when(repository.nextVersion(anyString())).thenReturn(1);
         when(repository.findDraftByCode(anyString())).thenReturn(Optional.empty());
         stubOperationType("OCT", OperationDirection.OUT, CounterpartyType.CARD);

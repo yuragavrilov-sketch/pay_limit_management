@@ -45,7 +45,11 @@ class LimitRuleServiceTest {
     @BeforeEach
     void setUp() {
         repository = new FakeRepository();
-        service = new LimitRuleService(repository, CLOCK);
+        service = new LimitRuleService(
+                repository,
+                ru.copperside.paylimits.management.common.invariant.InvariantTestSupport.noOpChecker(),
+                new ru.copperside.paylimits.management.common.invariant.InvariantTestSupport.PassThroughTransactionRunner(),
+                CLOCK);
     }
 
     @Test

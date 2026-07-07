@@ -305,10 +305,25 @@ class LimitRuleControllerTest {
             return new FakeRepository();
         }
 
+        @Bean
+        ru.copperside.paylimits.management.common.invariant.LimitKindInvariantChecker limitKindInvariantChecker() {
+            return ru.copperside.paylimits.management.common.invariant.InvariantTestSupport.noOpChecker();
+        }
+
+        @Bean
+        ru.copperside.paylimits.management.common.invariant.port.TransactionRunner transactionRunner() {
+            return new ru.copperside.paylimits.management.common.invariant.InvariantTestSupport.PassThroughTransactionRunner();
+        }
+
         @Bean("testLimitRuleService")
         @Primary
-        LimitRuleService limitRuleService(FakeRepository repository, java.time.Clock clock) {
-            return new LimitRuleService(repository, clock);
+        LimitRuleService limitRuleService(
+                FakeRepository repository,
+                ru.copperside.paylimits.management.common.invariant.LimitKindInvariantChecker invariantChecker,
+                ru.copperside.paylimits.management.common.invariant.port.TransactionRunner transactionRunner,
+                java.time.Clock clock
+        ) {
+            return new LimitRuleService(repository, invariantChecker, transactionRunner, clock);
         }
     }
 

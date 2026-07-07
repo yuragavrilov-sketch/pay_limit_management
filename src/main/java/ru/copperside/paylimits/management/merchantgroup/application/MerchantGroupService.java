@@ -1,5 +1,7 @@
 package ru.copperside.paylimits.management.merchantgroup.application;
 
+import ru.copperside.paylimits.management.common.invariant.LimitKindInvariantChecker;
+import ru.copperside.paylimits.management.common.invariant.port.TransactionRunner;
 import ru.copperside.paylimits.management.merchantgroup.application.port.out.MerchantGroupRepository;
 import ru.copperside.paylimits.management.merchantgroup.domain.MerchantGroup;
 import ru.copperside.paylimits.management.merchantgroup.domain.MerchantGroupMembership;
@@ -14,10 +16,19 @@ import java.util.UUID;
 public class MerchantGroupService {
 
     private final MerchantGroupRepository repository;
+    private final LimitKindInvariantChecker invariantChecker;
+    private final TransactionRunner transactionRunner;
     private final Clock clock;
 
-    public MerchantGroupService(MerchantGroupRepository repository, Clock clock) {
+    public MerchantGroupService(
+            MerchantGroupRepository repository,
+            LimitKindInvariantChecker invariantChecker,
+            TransactionRunner transactionRunner,
+            Clock clock
+    ) {
         this.repository = repository;
+        this.invariantChecker = invariantChecker;
+        this.transactionRunner = transactionRunner;
         this.clock = clock;
     }
 
@@ -128,9 +139,15 @@ public class MerchantGroupService {
                 null
         );
 
-        return repository.findOverlappingMembership(merchantId, type.id(), validFrom)
-                .map(existing -> replaceExistingMembership(existing, validFrom, now, actor, membership))
-                .orElseGet(() -> repository.saveMembership(membership));
+        // Lock (by merchant), the non-overlap invariant check, and the membership write share a
+        // single transaction so the advisory lock actually serializes concurrent membership changes
+        // for the same merchant (advisory xact locks release at transaction end).
+        return transactionRunner.run(() -> {
+            invariantChecker.checkMembership(merchantId, group.id(), now);
+            return repository.findOverlappingMembership(merchantId, type.id(), validFrom)
+                    .map(existing -> replaceExistingMembership(existing, validFrom, now, actor, membership))
+                    .orElseGet(() -> repository.saveMembership(membership));
+        });
     }
 
     public List<MerchantGroupMembership> listMemberships(MembershipQuery query) {

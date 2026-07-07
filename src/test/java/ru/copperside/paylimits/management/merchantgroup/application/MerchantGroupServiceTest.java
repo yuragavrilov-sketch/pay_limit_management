@@ -29,7 +29,11 @@ class MerchantGroupServiceTest {
     @BeforeEach
     void setUp() {
         repository = new FakeRepository();
-        service = new MerchantGroupService(repository, CLOCK);
+        service = new MerchantGroupService(
+                repository,
+                ru.copperside.paylimits.management.common.invariant.InvariantTestSupport.noOpChecker(),
+                new ru.copperside.paylimits.management.common.invariant.InvariantTestSupport.PassThroughTransactionRunner(),
+                CLOCK);
     }
 
     @Test

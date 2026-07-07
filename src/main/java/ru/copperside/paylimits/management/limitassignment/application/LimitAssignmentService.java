@@ -1,5 +1,7 @@
 package ru.copperside.paylimits.management.limitassignment.application;
 
+import ru.copperside.paylimits.management.common.invariant.LimitKindInvariantChecker;
+import ru.copperside.paylimits.management.common.invariant.port.TransactionRunner;
 import ru.copperside.paylimits.management.limitassignment.application.port.out.LimitAssignmentRepository;
 import ru.copperside.paylimits.management.limitassignment.domain.AssignmentOwnerType;
 import ru.copperside.paylimits.management.limitassignment.domain.LimitAssignment;
@@ -17,10 +19,19 @@ import java.util.UUID;
 public class LimitAssignmentService {
 
     private final LimitAssignmentRepository repository;
+    private final LimitKindInvariantChecker invariantChecker;
+    private final TransactionRunner transactionRunner;
     private final Clock clock;
 
-    public LimitAssignmentService(LimitAssignmentRepository repository, Clock clock) {
+    public LimitAssignmentService(
+            LimitAssignmentRepository repository,
+            LimitKindInvariantChecker invariantChecker,
+            TransactionRunner transactionRunner,
+            Clock clock
+    ) {
         this.repository = repository;
+        this.invariantChecker = invariantChecker;
+        this.transactionRunner = transactionRunner;
         this.clock = clock;
     }
 
@@ -37,10 +48,9 @@ public class LimitAssignmentService {
         LimitMode limitMode = requireEnum(command.limitMode(), "limitMode");
         Instant validFrom = requireInstant(command.validFrom(), "validFrom");
         Instant validTo = validatePeriod(validFrom, command.validTo());
-        rejectOverlap(null, ruleId, ownerType, ownerId, validFrom, validTo, true);
 
         Instant now = Instant.now(clock);
-        return repository.saveAssignment(new LimitAssignment(
+        LimitAssignment assignment = new LimitAssignment(
                 UUID.randomUUID(),
                 ruleId,
                 ownerType,
@@ -51,7 +61,19 @@ public class LimitAssignmentService {
                 true,
                 now,
                 now
-        ));
+        );
+
+        // Lock (by rule), the non-overlap invariant check, and the assignment write share a single
+        // transaction so the advisory lock actually serializes concurrent assignment/activation
+        // changes for the same rule. The limit-kind invariant only applies to GROUP-level
+        // assignments; GLOBAL/MERCHANT assignments skip it.
+        return transactionRunner.run(() -> {
+            if (ownerType == AssignmentOwnerType.MERCHANT_GROUP) {
+                invariantChecker.checkGroupAssignment(ruleId, UUID.fromString(ownerId), now);
+            }
+            rejectOverlap(null, ruleId, ownerType, ownerId, validFrom, validTo, true);
+            return repository.saveAssignment(assignment);
+        });
     }
 
     public LimitAssignment patchAssignment(UUID assignmentId, PatchLimitAssignmentCommand command) {

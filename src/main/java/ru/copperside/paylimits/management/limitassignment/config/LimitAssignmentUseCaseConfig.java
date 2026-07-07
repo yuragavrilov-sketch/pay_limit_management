@@ -3,6 +3,8 @@ package ru.copperside.paylimits.management.limitassignment.config;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import ru.copperside.paylimits.management.common.invariant.LimitKindInvariantChecker;
+import ru.copperside.paylimits.management.common.invariant.port.TransactionRunner;
 import ru.copperside.paylimits.management.limitassignment.application.LimitAssignmentService;
 import ru.copperside.paylimits.management.limitassignment.application.port.out.LimitAssignmentRepository;
 
@@ -13,7 +15,12 @@ public class LimitAssignmentUseCaseConfig {
 
     @Bean
     @ConditionalOnBean(LimitAssignmentRepository.class)
-    LimitAssignmentService limitAssignmentService(LimitAssignmentRepository repository, Clock clock) {
-        return new LimitAssignmentService(repository, clock);
+    LimitAssignmentService limitAssignmentService(
+            LimitAssignmentRepository repository,
+            LimitKindInvariantChecker invariantChecker,
+            TransactionRunner transactionRunner,
+            Clock clock
+    ) {
+        return new LimitAssignmentService(repository, invariantChecker, transactionRunner, clock);
     }
 }
