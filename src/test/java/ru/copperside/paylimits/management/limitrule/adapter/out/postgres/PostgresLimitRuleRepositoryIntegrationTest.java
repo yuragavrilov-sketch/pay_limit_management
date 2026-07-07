@@ -166,6 +166,31 @@ class PostgresLimitRuleRepositoryIntegrationTest {
                 .hasMessageContaining("INVALID_RULE_DEFINITION");
     }
 
+    @Test
+    void mapsOperationTypeAllDirectionToInvalidDirectionProblemCode() {
+        Instant now = Instant.parse("2026-05-27T09:00:00Z");
+
+        assertThatThrownBy(() -> repository.saveOperationType(operationType(
+                "RULE_ALL_DIRECTION", OperationDirection.ALL, now)))
+                .isInstanceOf(LimitRuleProblemException.class)
+                .hasMessageContaining("OPERATION_TYPE_INVALID_DIRECTION");
+    }
+
+    private OperationType operationType(String code, OperationDirection direction, Instant now) {
+        return new OperationType(
+                UUID.randomUUID(),
+                code,
+                code,
+                "SBP",
+                direction,
+                CounterpartyType.PHONE,
+                true,
+                100,
+                now,
+                now
+        );
+    }
+
     private LimitRule rule(
             RuleSelector<OperationSelectorType> operationSelector,
             OperationDirection direction,

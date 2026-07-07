@@ -328,6 +328,10 @@ public class PostgresLimitRuleRepository implements LimitRuleRepository {
         if (message.contains("operation_types_code_uk")) {
             return new LimitRuleProblemException("OPERATION_TYPE_CODE_CONFLICT", "Operation type code already exists");
         }
+        if (message.contains("operation_types_direction_chk")) {
+            return new LimitRuleProblemException("OPERATION_TYPE_INVALID_DIRECTION",
+                    "Operation type direction must be IN or OUT");
+        }
         if (message.contains("limit_rules_code_version_uk")) {
             return new LimitRuleProblemException("RULE_CODE_CONFLICT", "Rule code and version already exist");
         }
