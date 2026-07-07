@@ -90,11 +90,14 @@ public class RuntimeManifestCompiler {
         Instant now = canonicalInstant(Instant.now(clock));
         validateEffectiveFrom(effectiveFrom, now);
         Instant canonicalEffectiveFrom = canonicalInstant(effectiveFrom);
-        // The manifest persist (repository.saveCompiledManifest) is itself @Transactional; wrapping it
-        // in transactionRunner.run makes the persist and the audit append share ONE transaction (the
-        // inner @Transactional joins via default REQUIRED propagation, keeping its LOCK TABLE / version
-        // logic intact), so the manifest row and its audit event commit or roll back together.
-        return transactionRunner.run(() -> {
+        // The manifest persist (repository.saveCompiledManifest) is itself @Transactional(REPEATABLE_READ);
+        // wrapping it in transactionRunner.runRepeatableRead makes the persist and the audit append share
+        // ONE REPEATABLE_READ transaction (the inner @Transactional joins via default REQUIRED propagation,
+        // keeping its LOCK TABLE / version logic intact and inheriting the outer isolation level per spec
+        // §4.2 step 2 — a participating @Transactional method cannot upgrade the already-open transaction's
+        // isolation), so the manifest row and its audit event commit or roll back together under a
+        // consistent compilation snapshot.
+        return transactionRunner.runRepeatableRead(() -> {
             RuntimeManifest manifest = repository.saveCompiledManifest(
                     version -> buildManifest(version, now, canonicalEffectiveFrom));
             recordManifestAudit("COMPILE", manifest);
@@ -155,7 +158,7 @@ public class RuntimeManifestCompiler {
         Instant now = canonicalInstant(Instant.now(clock));
         validateEffectiveFrom(effectiveFrom, now);
         Instant canonicalEffectiveFrom = canonicalInstant(effectiveFrom);
-        return transactionRunner.run(() -> {
+        return transactionRunner.runRepeatableRead(() -> {
             RuntimeManifest manifest = repository.saveCompiledManifest(
                     version -> buildRollbackManifest(source, version, now, canonicalEffectiveFrom));
             recordManifestAudit("ROLLBACK", manifest);

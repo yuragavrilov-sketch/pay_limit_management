@@ -22,4 +22,18 @@ public interface TransactionRunner {
             return null;
         });
     }
+
+    /**
+     * Runs {@code work} inside a transaction pinned to {@code REPEATABLE READ}. Use this instead of
+     * {@link #run(Supplier)} whenever the unit of work needs a consistent snapshot across multiple
+     * reads (e.g. manifest compilation snapshotting rules/assignments/memberships before persisting).
+     */
+    <T> T runRepeatableRead(Supplier<T> work);
+
+    default void runRepeatableRead(Runnable work) {
+        runRepeatableRead(() -> {
+            work.run();
+            return null;
+        });
+    }
 }

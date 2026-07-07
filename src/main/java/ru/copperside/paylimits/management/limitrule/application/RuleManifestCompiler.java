@@ -1,5 +1,7 @@
 package ru.copperside.paylimits.management.limitrule.application;
 
+import ru.copperside.paylimits.management.audit.application.AuditRecorder;
+import ru.copperside.paylimits.management.common.invariant.port.TransactionRunner;
 import ru.copperside.paylimits.management.limitrule.application.port.out.RuleManifestRepository;
 import ru.copperside.paylimits.management.limitrule.domain.AttributeSelectorType;
 import ru.copperside.paylimits.management.limitrule.domain.CompiledRule;
@@ -34,52 +36,94 @@ import java.util.stream.Collectors;
 public class RuleManifestCompiler {
 
     private static final String DEFAULT_CURRENCY = "RUB";
+    private static final String ENTITY_RULE_MANIFEST = "RULE_MANIFEST";
 
     private final RuleManifestRepository repository;
     private final Clock clock;
+    private final TransactionRunner transactionRunner;
+    private final AuditRecorder auditRecorder;
     private final RuleManifestCanonicalJson canonicalJson;
 
-    public RuleManifestCompiler(RuleManifestRepository repository, Clock clock) {
-        this(repository, clock, new RuleManifestCanonicalJson());
+    public RuleManifestCompiler(
+            RuleManifestRepository repository,
+            Clock clock,
+            TransactionRunner transactionRunner,
+            AuditRecorder auditRecorder
+    ) {
+        this(repository, clock, transactionRunner, auditRecorder, new RuleManifestCanonicalJson());
     }
 
-    RuleManifestCompiler(RuleManifestRepository repository, Clock clock, RuleManifestCanonicalJson canonicalJson) {
+    RuleManifestCompiler(
+            RuleManifestRepository repository,
+            Clock clock,
+            TransactionRunner transactionRunner,
+            AuditRecorder auditRecorder,
+            RuleManifestCanonicalJson canonicalJson
+    ) {
         this.repository = repository;
         this.clock = clock;
+        this.transactionRunner = transactionRunner;
+        this.auditRecorder = auditRecorder;
         this.canonicalJson = canonicalJson;
     }
 
     public RuleManifest compile() {
-        return repository.saveCompiledManifest((version, activeRules, dictionaries) -> {
-            List<LimitRule> rules = activeRules.stream()
-                    .filter(LimitRule::active)
-                    .sorted(Comparator.comparing(LimitRule::code)
-                            .thenComparingInt(LimitRule::version)
-                            .thenComparing(rule -> rule.id().toString()))
-                    .toList();
+        // The manifest persist (repository.saveCompiledManifest) is itself
+        // @Transactional(REPEATABLE_READ) and also reads an active-rules/dictionaries snapshot before
+        // persisting, so it is wrapped in transactionRunner.runRepeatableRead: the inner @Transactional
+        // joins via default REQUIRED propagation (keeping its LOCK TABLE / version logic intact and
+        // inheriting the outer REPEATABLE_READ isolation), and the audit append shares that same
+        // transaction, so the manifest row and its audit event commit or roll back together.
+        return transactionRunner.runRepeatableRead(() -> {
+            RuleManifest manifest = repository.saveCompiledManifest((version, activeRules, dictionaries) -> {
+                List<LimitRule> rules = activeRules.stream()
+                        .filter(LimitRule::active)
+                        .sorted(Comparator.comparing(LimitRule::code)
+                                .thenComparingInt(LimitRule::version)
+                                .thenComparing(rule -> rule.id().toString()))
+                        .toList();
 
-            List<ManifestDiagnostic> diagnostics = new ArrayList<>();
-            List<CompiledRule> compiledRules = rules.stream()
-                    .map(this::compileRule)
-                    .toList();
+                List<ManifestDiagnostic> diagnostics = new ArrayList<>();
+                List<CompiledRule> compiledRules = rules.stream()
+                        .map(this::compileRule)
+                        .toList();
 
-            DictionaryIndex dictionaryIndex = new DictionaryIndex(dictionaries);
-            validateRules(rules, dictionaryIndex, diagnostics);
-            if (diagnostics.isEmpty()) {
-                detectDuplicateRules(compiledRules, diagnostics);
-                detectOperationScopeOverlaps(compiledRules, diagnostics);
-            }
+                DictionaryIndex dictionaryIndex = new DictionaryIndex(dictionaries);
+                validateRules(rules, dictionaryIndex, diagnostics);
+                if (diagnostics.isEmpty()) {
+                    detectDuplicateRules(compiledRules, diagnostics);
+                    detectOperationScopeOverlaps(compiledRules, diagnostics);
+                }
 
-            if (!diagnostics.isEmpty()) {
-                throw new RuleManifestProblemException(
-                        "RULE_MANIFEST_CONFLICT",
-                        "Active rules cannot be compiled into a manifest",
-                        diagnostics
-                );
-            }
+                if (!diagnostics.isEmpty()) {
+                    throw new RuleManifestProblemException(
+                            "RULE_MANIFEST_CONFLICT",
+                            "Active rules cannot be compiled into a manifest",
+                            diagnostics
+                    );
+                }
 
-            return buildManifest(version, compiledRules);
+                return buildManifest(version, compiledRules);
+            });
+            recordManifestAudit(manifest);
+            return manifest;
         });
+    }
+
+    /**
+     * Appends the COMPILE audit event for a freshly persisted rule manifest, mirroring the
+     * runtime-manifest audit convention: {@code before} is always {@code null} (a manifest is
+     * immutable and only ever created); {@code after} carries a compact descriptor
+     * (id/version/checksum/ruleCount/createdAt) rather than the full payload.
+     */
+    private void recordManifestAudit(RuleManifest manifest) {
+        RuleManifestAuditDescriptor descriptor = new RuleManifestAuditDescriptor(
+                manifest.id(),
+                manifest.version(),
+                manifest.checksum(),
+                manifest.ruleCount(),
+                manifest.createdAt());
+        auditRecorder.record(ENTITY_RULE_MANIFEST, manifest.id().toString(), "COMPILE", null, descriptor);
     }
 
     public RuleManifest getLatest() {
@@ -361,6 +405,15 @@ public class RuleManifestCompiler {
 
     private RuleManifestProblemException problemNotFound() {
         return new RuleManifestProblemException("RULE_MANIFEST_NOT_FOUND", "Rule manifest not found");
+    }
+
+    private record RuleManifestAuditDescriptor(
+            UUID id,
+            int version,
+            String checksum,
+            int ruleCount,
+            Instant createdAt
+    ) {
     }
 
     private record MatcherMeasureKey(CompiledRule rule) {

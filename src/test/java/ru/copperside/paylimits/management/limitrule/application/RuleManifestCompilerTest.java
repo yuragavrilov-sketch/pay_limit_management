@@ -44,11 +44,17 @@ class RuleManifestCompilerTest {
 
     private FakeManifestRepository repository;
     private RuleManifestCompiler compiler;
+    private ru.copperside.paylimits.management.audit.AuditTestSupport.RecordingAuditEventRepository auditRepository;
 
     @BeforeEach
     void setUp() {
         repository = new FakeManifestRepository();
-        compiler = new RuleManifestCompiler(repository, CLOCK);
+        auditRepository = new ru.copperside.paylimits.management.audit.AuditTestSupport.RecordingAuditEventRepository();
+        compiler = new RuleManifestCompiler(
+                repository,
+                CLOCK,
+                new ru.copperside.paylimits.management.common.invariant.InvariantTestSupport.PassThroughTransactionRunner(),
+                ru.copperside.paylimits.management.audit.AuditTestSupport.recorder(auditRepository, CLOCK));
     }
 
     @Test
@@ -75,6 +81,32 @@ class RuleManifestCompilerTest {
         assertThat(manifest.payload().rules()).isEqualTo(manifest.rules());
         assertThat(manifest.payload().diagnostics()).isEqualTo(manifest.diagnostics());
         assertThat(repository.saved).containsExactly(manifest);
+    }
+
+    // Spec §6: every mutating operation is audited, including the legacy v1 rule-manifest compile.
+    @Test
+    void writesAuditEventOnManifestCompile() {
+        repository.addActiveRule("RULE_A", Set.of("SBP_C2B"), OperationDirection.IN, noneSelector());
+
+        RuleManifest manifest = compiler.compile();
+
+        assertThat(auditRepository.events()).hasSize(1);
+        var event = auditRepository.events().get(0);
+        assertThat(event.entityType()).isEqualTo("RULE_MANIFEST");
+        assertThat(event.entityId()).isEqualTo(manifest.id().toString());
+        assertThat(event.action()).isEqualTo("COMPILE");
+        assertThat(event.beforeJson()).isNull();
+        assertThat(event.afterJson()).contains(manifest.checksum());
+    }
+
+    @Test
+    void writesNoAuditEventWhenCompileFailsOnConflict() {
+        repository.addActiveRule("RULE_A", Set.of("SBP_C2B"), OperationDirection.IN, noneSelector());
+        repository.addActiveRule("RULE_B", Set.of("SBP_C2B"), OperationDirection.IN, noneSelector());
+
+        assertThatThrownBy(() -> compiler.compile()).isInstanceOf(RuleManifestProblemException.class);
+
+        assertThat(auditRepository.events()).isEmpty();
     }
 
     @Test

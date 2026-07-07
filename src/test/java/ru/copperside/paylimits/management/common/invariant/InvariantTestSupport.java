@@ -30,6 +30,11 @@ public final class InvariantTestSupport {
         public <T> T run(Supplier<T> work) {
             return work.get();
         }
+
+        @Override
+        public <T> T runRepeatableRead(Supplier<T> work) {
+            return work.get();
+        }
     }
 
     private static final class NoOpRepository implements LimitKindInvariantRepository {

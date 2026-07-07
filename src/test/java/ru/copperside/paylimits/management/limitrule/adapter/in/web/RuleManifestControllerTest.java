@@ -176,7 +176,11 @@ class RuleManifestControllerTest {
         private final Map<UUID, RuleManifest> manifestsById = new java.util.HashMap<>();
 
         FakeCompiler() {
-            super(new EmptyManifestRepository(), Clock.fixed(NOW, ZoneOffset.UTC));
+            super(new EmptyManifestRepository(), Clock.fixed(NOW, ZoneOffset.UTC),
+                    new ru.copperside.paylimits.management.common.invariant.InvariantTestSupport.PassThroughTransactionRunner(),
+                    ru.copperside.paylimits.management.audit.AuditTestSupport.recorder(
+                            new ru.copperside.paylimits.management.audit.AuditTestSupport.RecordingAuditEventRepository(),
+                            Clock.fixed(NOW, ZoneOffset.UTC)));
         }
 
         void reset() {
