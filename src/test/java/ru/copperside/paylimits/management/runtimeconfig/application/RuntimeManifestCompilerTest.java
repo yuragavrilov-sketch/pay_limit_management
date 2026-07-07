@@ -2,6 +2,7 @@ package ru.copperside.paylimits.management.runtimeconfig.application;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import ru.copperside.paylimits.management.common.invariant.LimitKindConflictException;
 import ru.copperside.paylimits.management.limitassignment.domain.AssignmentOwnerType;
 import ru.copperside.paylimits.management.limitassignment.domain.LimitMode;
 import ru.copperside.paylimits.management.limitrule.domain.AggregationScope;
@@ -183,6 +184,52 @@ class RuntimeManifestCompilerTest {
         assertThat(rollback.checksum()).isNotEqualTo(source.checksum());
     }
 
+    @Test
+    void rejectsCompilationWhenSnapshotDeliversConflictingKindFromTwoGroups() {
+        // A merchant belongs to two groups, each with an enabled MERCHANT_GROUP assignment of an
+        // active rule of the SAME kind (default rule kind). Individually seeded, together they violate
+        // the non-overlap invariant, so compilation must fail with 422 (compilation=true) and persist
+        // nothing.
+        String merchantId = "700009";
+        LimitRule ruleA = repository.addActiveRule("RULE_CONFLICT_A");
+        LimitRule ruleB = repository.addActiveRule("RULE_CONFLICT_B");
+        UUID groupA = UUID.randomUUID();
+        UUID groupB = UUID.randomUUID();
+        repository.addAssignment(ruleA.id(), ruleA.code(), AssignmentOwnerType.MERCHANT_GROUP, groupA.toString(), LimitMode.LIMITED);
+        repository.addAssignment(ruleB.id(), ruleB.code(), AssignmentOwnerType.MERCHANT_GROUP, groupB.toString(), LimitMode.LIMITED);
+        repository.addMembership(merchantId, groupA);
+        repository.addMembership(merchantId, groupB);
+
+        assertThatThrownBy(() -> compiler.compile(Instant.parse("2026-05-29T10:15:00Z")))
+                .isInstanceOf(LimitKindConflictException.class)
+                .satisfies(ex -> {
+                    LimitKindConflictException conflict = (LimitKindConflictException) ex;
+                    assertThat(conflict.compilation()).isTrue();
+                    assertThat(conflict.conflicts()).singleElement()
+                            .satisfies(c -> assertThat(c.merchantId()).isEqualTo(merchantId));
+                });
+
+        assertThat(repository.manifests).isEmpty();
+    }
+
+    @Test
+    void compilesWhenConflictingKindsAreConfinedToASingleGroup() {
+        // Same conflicting kinds but both assignments target the SAME group the merchant belongs to:
+        // the invariant is about kinds arriving from DIFFERENT groups, so this compiles normally.
+        String merchantId = "700010";
+        LimitRule ruleA = repository.addActiveRule("RULE_SAME_GROUP_A");
+        LimitRule ruleB = repository.addActiveRule("RULE_SAME_GROUP_B");
+        UUID group = UUID.randomUUID();
+        repository.addAssignment(ruleA.id(), ruleA.code(), AssignmentOwnerType.MERCHANT_GROUP, group.toString(), LimitMode.LIMITED);
+        repository.addAssignment(ruleB.id(), ruleB.code(), AssignmentOwnerType.MERCHANT_GROUP, group.toString(), LimitMode.LIMITED);
+        repository.addMembership(merchantId, group);
+
+        RuntimeManifest manifest = compiler.compile(Instant.parse("2026-05-29T10:15:00Z"));
+
+        assertThat(manifest.version()).isEqualTo(1);
+        assertThat(repository.manifests).containsExactly(manifest);
+    }
+
     private static Set<String> orderedSet(String... codes) {
         return new LinkedHashSet<>(java.util.Arrays.asList(codes));
     }
@@ -259,11 +306,15 @@ class RuntimeManifestCompilerTest {
         }
 
         RuntimeMerchantGroupMembership addMembership(String merchantId) {
+            return addMembership(merchantId, UUID.randomUUID());
+        }
+
+        RuntimeMerchantGroupMembership addMembership(String merchantId, UUID groupId) {
             RuntimeMerchantGroupMembership membership = new RuntimeMerchantGroupMembership(
                     UUID.randomUUID(),
                     merchantId,
                     UUID.randomUUID(),
-                    UUID.randomUUID(),
+                    groupId,
                     Instant.parse("2026-05-01T00:00:00Z"),
                     null
             );

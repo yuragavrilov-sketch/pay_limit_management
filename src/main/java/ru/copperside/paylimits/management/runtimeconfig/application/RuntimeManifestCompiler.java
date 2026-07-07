@@ -1,5 +1,12 @@
 package ru.copperside.paylimits.management.runtimeconfig.application;
 
+import ru.copperside.paylimits.management.common.invariant.LimitKindConflict;
+import ru.copperside.paylimits.management.common.invariant.LimitKindConflictException;
+import ru.copperside.paylimits.management.common.invariant.LimitKindInvariantChecker;
+import ru.copperside.paylimits.management.common.invariant.LimitKindInvariantChecker.SnapshotGroupAssignment;
+import ru.copperside.paylimits.management.common.invariant.LimitKindInvariantChecker.SnapshotMembership;
+import ru.copperside.paylimits.management.limitassignment.domain.AssignmentOwnerType;
+import ru.copperside.paylimits.management.limitrule.domain.LimitKind;
 import ru.copperside.paylimits.management.limitrule.domain.LimitRule;
 import ru.copperside.paylimits.management.limitrule.domain.ManifestDiagnostic;
 import ru.copperside.paylimits.management.runtimeconfig.application.port.out.RuntimeManifestRepository;
@@ -18,6 +25,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.Comparator;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -130,8 +138,10 @@ public class RuntimeManifestCompiler {
     }
 
     private RuntimeManifest buildManifest(int version, Instant createdAt, Instant effectiveFrom) {
-        List<RuntimeCompiledRule> rules = repository.listActiveRulesForCompilation().stream()
+        List<LimitRule> activeRules = repository.listActiveRulesForCompilation().stream()
                 .filter(LimitRule::active)
+                .toList();
+        List<RuntimeCompiledRule> rules = activeRules.stream()
                 .sorted(Comparator.comparing(LimitRule::code)
                         .thenComparingInt(LimitRule::version)
                         .thenComparing(rule -> rule.id().toString()))
@@ -149,6 +159,7 @@ public class RuntimeManifestCompiler {
                         .thenComparing(RuntimeMerchantGroupMembership::validFrom)
                         .thenComparing(membership -> membership.membershipId().toString()))
                 .toList();
+        checkSnapshotInvariant(activeRules, assignments, memberships);
         RuntimeManifestPayload payload = new RuntimeManifestPayload(
                 version,
                 RuntimeManifestStatus.VALID,
@@ -178,6 +189,36 @@ public class RuntimeManifestCompiler {
                 payload.diagnostics(),
                 payload
         );
+    }
+
+    /**
+     * Re-checks the limit-kind non-overlap invariant over the compiled snapshot before the manifest
+     * is persisted (last line of defence, spec §3.4). Uses only the data already loaded for this
+     * compilation — no additional queries — and, on any conflict, aborts compilation with a 422 so the
+     * manifest is never created.
+     */
+    private void checkSnapshotInvariant(
+            List<LimitRule> activeRules,
+            List<RuntimeCompiledAssignment> assignments,
+            List<RuntimeMerchantGroupMembership> memberships
+    ) {
+        Map<UUID, LimitKind> ruleKinds = new HashMap<>();
+        for (LimitRule rule : activeRules) {
+            ruleKinds.put(rule.id(), LimitKind.of(rule));
+        }
+        List<SnapshotGroupAssignment> groupAssignments = assignments.stream()
+                .filter(assignment -> assignment.ownerType() == AssignmentOwnerType.MERCHANT_GROUP)
+                .map(assignment -> new SnapshotGroupAssignment(
+                        UUID.fromString(assignment.ownerId()), assignment.ruleId()))
+                .toList();
+        List<SnapshotMembership> snapshotMemberships = memberships.stream()
+                .map(membership -> new SnapshotMembership(membership.merchantId(), membership.groupId()))
+                .toList();
+        List<LimitKindConflict> conflicts = LimitKindInvariantChecker.findSnapshotConflicts(
+                snapshotMemberships, groupAssignments, ruleKinds);
+        if (!conflicts.isEmpty()) {
+            throw new LimitKindConflictException(conflicts, true);
+        }
     }
 
     private RuntimeManifest buildRollbackManifest(

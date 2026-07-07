@@ -9,8 +9,12 @@ import ru.copperside.paylimits.management.limitrule.domain.OperationDirection;
 import ru.copperside.paylimits.management.limitrule.domain.RuleMetric;
 import ru.copperside.paylimits.management.limitrule.domain.RulePeriod;
 
+import ru.copperside.paylimits.management.common.invariant.LimitKindInvariantChecker.SnapshotGroupAssignment;
+import ru.copperside.paylimits.management.common.invariant.LimitKindInvariantChecker.SnapshotMembership;
+
 import java.time.Instant;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
@@ -158,5 +162,76 @@ class LimitKindInvariantCheckerTest {
         assertThatCode(() -> checker.checkRuleActivation(ruleId, AT)).doesNotThrowAnyException();
         verify(repository).lockRule(ruleId);
         verify(repository, org.mockito.Mockito.never()).membersOfGroup(any(), any());
+    }
+
+    // ---- snapshot re-check (compilation, checkpoint d) ----
+
+    @Test
+    void snapshotConflictBetweenTwoGroupsSharingAMemberIsDetected() {
+        String merchantId = "700001";
+        UUID ruleA = UUID.randomUUID();
+        UUID ruleB = UUID.randomUUID();
+        // Two groups ordered by UUID string so the assertion on existing/requested is deterministic.
+        UUID groupLow = UUID.fromString("00000000-0000-0000-0000-000000000001");
+        UUID groupHigh = UUID.fromString("00000000-0000-0000-0000-000000000002");
+
+        List<LimitKindConflict> conflicts = LimitKindInvariantChecker.findSnapshotConflicts(
+                List.of(new SnapshotMembership(merchantId, groupLow), new SnapshotMembership(merchantId, groupHigh)),
+                List.of(new SnapshotGroupAssignment(groupLow, ruleA), new SnapshotGroupAssignment(groupHigh, ruleB)),
+                Map.of(ruleA, COUNT_DAY_PHONE_IN, ruleB, COUNT_DAY_PHONE_IN));
+
+        assertThat(conflicts).singleElement().satisfies(conflict -> {
+            assertThat(conflict.merchantId()).isEqualTo(merchantId);
+            assertThat(conflict.limitKind().checkType()).isEqualTo("COUNT_DAY");
+            assertThat(conflict.existingGroupId()).isEqualTo(groupLow);
+            assertThat(conflict.requestedGroupId()).isEqualTo(groupHigh);
+        });
+    }
+
+    @Test
+    void snapshotDisjointKindsFromTwoGroupsProduceNoConflict() {
+        String merchantId = "700002";
+        UUID ruleA = UUID.randomUUID();
+        UUID ruleB = UUID.randomUUID();
+        UUID groupA = UUID.randomUUID();
+        UUID groupB = UUID.randomUUID();
+
+        List<LimitKindConflict> conflicts = LimitKindInvariantChecker.findSnapshotConflicts(
+                List.of(new SnapshotMembership(merchantId, groupA), new SnapshotMembership(merchantId, groupB)),
+                List.of(new SnapshotGroupAssignment(groupA, ruleA), new SnapshotGroupAssignment(groupB, ruleB)),
+                Map.of(ruleA, COUNT_DAY_PHONE_IN, ruleB, DISJOINT_AMOUNT_MONTH));
+
+        assertThat(conflicts).isEmpty();
+    }
+
+    @Test
+    void snapshotSameKindFromASingleGroupIsNotAConflict() {
+        String merchantId = "700003";
+        UUID ruleA = UUID.randomUUID();
+        UUID onlyGroup = UUID.randomUUID();
+
+        List<LimitKindConflict> conflicts = LimitKindInvariantChecker.findSnapshotConflicts(
+                List.of(new SnapshotMembership(merchantId, onlyGroup)),
+                List.of(new SnapshotGroupAssignment(onlyGroup, ruleA)),
+                Map.of(ruleA, COUNT_DAY_PHONE_IN));
+
+        assertThat(conflicts).isEmpty();
+    }
+
+    @Test
+    void snapshotIgnoresAssignmentsOfRulesAbsentFromTheSnapshot() {
+        String merchantId = "700004";
+        UUID activeRule = UUID.randomUUID();
+        UUID inactiveRule = UUID.randomUUID();
+        UUID groupA = UUID.randomUUID();
+        UUID groupB = UUID.randomUUID();
+
+        // groupB delivers a rule that is not part of the (active) snapshot -> no kind, no conflict.
+        List<LimitKindConflict> conflicts = LimitKindInvariantChecker.findSnapshotConflicts(
+                List.of(new SnapshotMembership(merchantId, groupA), new SnapshotMembership(merchantId, groupB)),
+                List.of(new SnapshotGroupAssignment(groupA, activeRule), new SnapshotGroupAssignment(groupB, inactiveRule)),
+                Map.of(activeRule, COUNT_DAY_PHONE_IN));
+
+        assertThat(conflicts).isEmpty();
     }
 }
