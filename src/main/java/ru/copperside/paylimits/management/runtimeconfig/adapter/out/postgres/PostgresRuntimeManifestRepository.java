@@ -30,7 +30,6 @@ import ru.copperside.paylimits.management.runtimeconfig.application.port.out.Run
 import ru.copperside.paylimits.management.runtimeconfig.domain.RuntimeCompiledAssignment;
 import ru.copperside.paylimits.management.runtimeconfig.domain.RuntimeManifest;
 import ru.copperside.paylimits.management.runtimeconfig.domain.RuntimeManifestDescriptor;
-import ru.copperside.paylimits.management.runtimeconfig.domain.RuntimeManifestLifecycleStatus;
 import ru.copperside.paylimits.management.runtimeconfig.domain.RuntimeManifestPayload;
 import ru.copperside.paylimits.management.runtimeconfig.domain.RuntimeManifestProblemException;
 import ru.copperside.paylimits.management.runtimeconfig.domain.RuntimeManifestStatus;
