@@ -1,0 +1,61 @@
+package ru.copperside.paylimits.management.common.invariant.port;
+
+import ru.copperside.paylimits.management.limitrule.domain.LimitKind;
+
+import java.util.List;
+import java.util.Optional;
+import java.util.UUID;
+
+/**
+ * Outbound port supplying the data the limit-kind non-overlap invariant checker needs
+ * (spec §2, techspec §6): the kinds a group delivers, group membership, and advisory-lock
+ * primitives that serialize concurrent invariant checks.
+ *
+ * <p>The lock methods only take effect inside an existing transaction (advisory <b>xact</b>
+ * locks release at transaction end) — the transaction boundary is owned by the invariant-check
+ * use case, not this port.
+ */
+public interface LimitKindInvariantRepository {
+
+    /**
+     * Serializes concurrent invariant checks that touch the same merchant (membership changes).
+     */
+    void lockMerchant(String merchantId);
+
+    /**
+     * Serializes concurrent invariant checks that touch the same rule (assignment/activation
+     * changes).
+     */
+    void lockRule(UUID ruleId);
+
+    /**
+     * The distinct {@link LimitKind}s delivered to merchants by a group, derived from that
+     * group's enabled {@code MERCHANT_GROUP} assignments of {@code ACTIVE} rules.
+     */
+    List<LimitKind> kindsDeliveredByGroup(UUID groupId);
+
+    /**
+     * The merchant ids that are current-or-future members of a group ({@code valid_to is null
+     * or valid_to > now()}), distinct.
+     */
+    List<String> membersOfGroup(UUID groupId);
+
+    /**
+     * For every group (other than {@code excludedGroupId}) the merchant is a current-or-future
+     * member of, the {@link LimitKind}s that group delivers, each tagged with its group id.
+     */
+    List<MerchantGroupKind> kindsReceivedByMerchantExcludingGroup(String merchantId, UUID excludedGroupId);
+
+    /**
+     * The groups that have an enabled {@code MERCHANT_GROUP} assignment of the given rule.
+     */
+    List<UUID> groupsWithEnabledAssignmentForRule(UUID ruleId);
+
+    /**
+     * The {@link LimitKind} of a rule by id (any status), or empty if the rule does not exist.
+     */
+    Optional<LimitKind> kindOfRule(UUID ruleId);
+
+    record MerchantGroupKind(UUID groupId, LimitKind kind) {
+    }
+}
