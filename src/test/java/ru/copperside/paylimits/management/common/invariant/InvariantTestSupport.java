@@ -58,6 +58,12 @@ public final class InvariantTestSupport {
         }
 
         @Override
+        public List<MerchantGroupKind> kindsReceivedByMerchantExcludingGroups(
+                String merchantId, java.util.Collection<java.util.UUID> excludedGroupIds, Instant at) {
+            return List.of();
+        }
+
+        @Override
         public List<java.util.UUID> groupsWithEnabledAssignmentForRule(java.util.UUID ruleId) {
             return List.of();
         }

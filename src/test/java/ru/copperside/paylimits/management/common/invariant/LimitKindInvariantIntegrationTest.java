@@ -189,6 +189,58 @@ class LimitKindInvariantIntegrationTest {
                 .andExpect(jsonPath("$.error").doesNotExist());
     }
 
+    // ---- Defect #2 regression (spec MGT-I-19): moving a merchant between two groups of the SAME
+    // type that both deliver an overlapping kind must SUCCEED (the predecessor membership is closed
+    // and replaced), while a real conflict with a group the merchant KEEPS must still 409. ----
+
+    @Test
+    void movingMerchantBetweenSameTypeGroupsDeliveringTheSameKindReplacesRatherThan409() throws Exception {
+        String merchantId = "990019";
+        UUID typeA = insertGroupType();
+        UUID groupG1 = insertGroup(typeA); // current membership
+        UUID groupG2 = insertGroup(typeA); // move target, same type
+
+        UUID ruleG1 = insertRule("MGT_I_19_G1", RuleMetric.COUNT, RulePeriod.DAY, LimitTargetType.PHONE,
+                OperationDirection.IN, "ACTIVE", Set.of("SBP_C2B"));
+        insertAssignment(ruleG1, "MERCHANT_GROUP", groupG1.toString(), true);
+        UUID ruleG2 = insertRule("MGT_I_19_G2", RuleMetric.COUNT, RulePeriod.DAY, LimitTargetType.PHONE,
+                OperationDirection.IN, "ACTIVE", Set.of("SBP_C2B"));
+        insertAssignment(ruleG2, "MERCHANT_GROUP", groupG2.toString(), true);
+
+        insertMembership(merchantId, groupG1, typeA, PAST, null);
+
+        // The same-type move: G2 delivers the same kind as the merchant's current group G1, but G1 is
+        // closed/replaced in the same transaction, so this must NOT 409.
+        mockMvc.perform(post("/internal/v1/limit-management/merchant-group-memberships")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                { "merchantId": "%s", "groupId": "%s", "validFrom": "2025-01-01T00:00:00Z" }
+                                """.formatted(merchantId, groupG2)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.merchantId").value(merchantId))
+                .andExpect(jsonPath("$.data.groupId").value(groupG2.toString()))
+                .andExpect(jsonPath("$.error").doesNotExist());
+
+        // The merchant now belongs to G2 only (G1 closed). Joining a DIFFERENT-type group that also
+        // delivers the same kind is a genuine overlap and must still 409 — the fix does not weaken it.
+        UUID typeB = insertGroupType();
+        UUID groupH = insertGroup(typeB);
+        UUID ruleH = insertRule("MGT_I_19_H", RuleMetric.COUNT, RulePeriod.DAY, LimitTargetType.PHONE,
+                OperationDirection.IN, "ACTIVE", Set.of("SBP_C2B"));
+        insertAssignment(ruleH, "MERCHANT_GROUP", groupH.toString(), true);
+
+        mockMvc.perform(post("/internal/v1/limit-management/merchant-group-memberships")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                { "merchantId": "%s", "groupId": "%s", "validFrom": "2025-06-01T00:00:00Z" }
+                                """.formatted(merchantId, groupH)))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.error.code").value("LIMIT_KIND_CONFLICT"))
+                .andExpect(jsonPath("$.error.conflicts[0].merchantId").value(merchantId))
+                .andExpect(jsonPath("$.error.conflicts[0].existingGroupId").value(groupG2.toString()))
+                .andExpect(jsonPath("$.error.conflicts[0].requestedGroupId").value(groupH.toString()));
+    }
+
     // ---- seed helpers (mirror PostgresLimitKindInvariantRepositoryIntegrationTest) ----
 
     private UUID insertGroupType() {

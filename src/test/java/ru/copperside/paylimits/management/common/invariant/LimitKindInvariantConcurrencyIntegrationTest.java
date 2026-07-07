@@ -64,6 +64,23 @@ class LimitKindInvariantConcurrencyIntegrationTest {
     @Autowired
     private MockMvc mockMvc;
 
+    @org.junit.jupiter.api.BeforeEach
+    void cleanDatabase() {
+        // Isolate each test: several cases here assert GLOBAL counts (persisted manifests, membership
+        // rows), so shared container state between methods must be reset.
+        jdbcTemplate.execute("""
+                truncate table
+                    limit_management.runtime_manifests,
+                    limit_management.merchant_group_memberships,
+                    limit_management.limit_assignments,
+                    limit_management.limit_rule_operation_type,
+                    limit_management.limit_rules,
+                    limit_management.merchant_groups,
+                    limit_management.merchant_group_types
+                restart identity cascade
+                """);
+    }
+
     // ---- MGT-I-06: two individually-valid group assignments of the SAME rule race; the advisory
     // lock (keyed by rule_id) serializes them, so exactly one commits and the other gets 409. ----
 
@@ -165,6 +182,56 @@ class LimitKindInvariantConcurrencyIntegrationTest {
         Integer manifests = jdbcTemplate.queryForObject(
                 "select count(*) from limit_management.runtime_manifests", Integer.class);
         assertThat(manifests).isZero();
+    }
+
+    // ---- Defect #1 regression: a CLOSED membership must not contribute to the compile-time re-check.
+    // A merchant that once belonged to a K-delivering group and now belongs to another K-delivering
+    // group is NOT a live overlap, so compilation must SUCCEED and persist the manifest. ----
+
+    @Test
+    void compilingSucceedsWhenAClosedMembershipDeliversAKindAlsoDeliveredByALiveGroup() throws Exception {
+        String merchantId = "990011";
+        UUID typeA = insertGroupType();
+        UUID typeB = insertGroupType();
+        UUID closedGroup = insertGroup(typeA);
+        UUID liveGroup = insertGroup(typeB);
+
+        // Closed membership in closedGroup (valid_to in the past) + open-ended membership in liveGroup.
+        insertClosedMembership(merchantId, closedGroup, typeA, PAST, Instant.parse("2021-01-01T00:00:00Z"));
+        insertMembership(merchantId, liveGroup, typeB);
+
+        UUID ruleClosed = insertRule("MGT_CLOSED", RuleMetric.COUNT, RulePeriod.DAY, LimitTargetType.PHONE,
+                OperationDirection.IN, "ACTIVE", Set.of("SBP_C2B"));
+        insertAssignment(ruleClosed, closedGroup.toString());
+        UUID ruleLive = insertRule("MGT_LIVE", RuleMetric.COUNT, RulePeriod.DAY, LimitTargetType.PHONE,
+                OperationDirection.IN, "ACTIVE", Set.of("SBP_C2B"));
+        insertAssignment(ruleLive, liveGroup.toString());
+
+        String effectiveFrom = Instant.now().plus(Duration.ofHours(1)).toString();
+
+        mockMvc.perform(post("/internal/v1/limit-management/runtime-manifests")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{ \"effectiveFrom\": \"%s\" }".formatted(effectiveFrom)))
+                .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.status().isOk())
+                .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers
+                        .jsonPath("$.data.status").value("VALID"))
+                // The manifest payload still carries BOTH membership rows (closed one included).
+                .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers
+                        .jsonPath("$.data.membershipCount").value(2));
+
+        Integer manifests = jdbcTemplate.queryForObject(
+                "select count(*) from limit_management.runtime_manifests", Integer.class);
+        assertThat(manifests).isEqualTo(1);
+    }
+
+    private void insertClosedMembership(String merchantId, UUID groupId, UUID groupTypeId, Instant validFrom, Instant validTo) {
+        jdbcTemplate.update("""
+                insert into limit_management.merchant_group_memberships
+                    (id, merchant_id, group_id, group_type_id, valid_from, valid_to, created_at, created_by, closed_at, closed_by)
+                values (?, ?, ?, ?, ?, ?, now(), 'tester', now(), 'tester')
+                """,
+                UUID.randomUUID(), merchantId, groupId, groupTypeId,
+                Timestamp.from(validFrom), Timestamp.from(validTo));
     }
 
     // ---- seed helpers (mirror LimitKindInvariantIntegrationTest) ----

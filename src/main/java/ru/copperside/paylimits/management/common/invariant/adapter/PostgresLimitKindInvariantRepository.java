@@ -15,6 +15,7 @@ import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Timestamp;
 import java.time.Instant;
+import java.util.Collection;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Optional;
@@ -66,7 +67,16 @@ public class PostgresLimitKindInvariantRepository implements LimitKindInvariantR
 
     @Override
     public List<MerchantGroupKind> kindsReceivedByMerchantExcludingGroup(String merchantId, UUID excludedGroupId, Instant at) {
-        return jdbcTemplate.query("""
+        return kindsReceivedByMerchantExcludingGroups(merchantId, List.of(excludedGroupId), at);
+    }
+
+    @Override
+    public List<MerchantGroupKind> kindsReceivedByMerchantExcludingGroups(
+            String merchantId, Collection<UUID> excludedGroupIds, Instant at) {
+        List<UUID> excluded = excludedGroupIds == null
+                ? List.of()
+                : List.copyOf(new LinkedHashSet<>(excludedGroupIds));
+        StringBuilder sql = new StringBuilder("""
                 select m.group_id as membership_group_id, r.metric, r.period, r.target_type, r.direction,
                        array_agg(ot.operation_type_code) as operation_types
                 from limit_management.merchant_group_memberships m
@@ -76,11 +86,19 @@ public class PostgresLimitKindInvariantRepository implements LimitKindInvariantR
                 join limit_management.limit_rule_operation_type ot on ot.rule_id = r.id
                 where m.merchant_id = ?
                   and (m.valid_to is null or m.valid_to > ?)
-                  and m.group_id <> ?
-                group by m.group_id, r.id, r.metric, r.period, r.target_type, r.direction
-                """,
+                """);
+        List<Object> params = new java.util.ArrayList<>();
+        params.add(merchantId);
+        params.add(Timestamp.from(at));
+        if (!excluded.isEmpty()) {
+            String placeholders = excluded.stream().map(id -> "?").collect(java.util.stream.Collectors.joining(", "));
+            sql.append("  and m.group_id not in (").append(placeholders).append(")\n");
+            params.addAll(excluded);
+        }
+        sql.append("group by m.group_id, r.id, r.metric, r.period, r.target_type, r.direction");
+        return jdbcTemplate.query(sql.toString(),
                 (rs, rowNum) -> new MerchantGroupKind(rs.getObject("membership_group_id", UUID.class), mapKind(rs)),
-                merchantId, Timestamp.from(at), excludedGroupId);
+                params.toArray());
     }
 
     @Override

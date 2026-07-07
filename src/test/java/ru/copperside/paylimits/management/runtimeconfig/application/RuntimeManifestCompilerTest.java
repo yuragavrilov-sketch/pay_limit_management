@@ -213,6 +213,32 @@ class RuntimeManifestCompilerTest {
     }
 
     @Test
+    void compilesWhenAClosedMembershipWouldOtherwiseDuplicateAKindFromALiveGroup() {
+        // Defect #1 regression: a merchant has a CLOSED membership in a K-delivering group plus a LIVE
+        // membership in another K-delivering group. The closed membership must be ignored by the
+        // snapshot invariant scan (it is not active at the compile instant), so compilation SUCCEEDS.
+        // The manifest PAYLOAD, however, still carries both membership rows unchanged.
+        String merchantId = "700011";
+        LimitRule ruleClosed = repository.addActiveRule("RULE_CLOSED_GROUP");
+        LimitRule ruleLive = repository.addActiveRule("RULE_LIVE_GROUP");
+        UUID closedGroup = UUID.randomUUID();
+        UUID liveGroup = UUID.randomUUID();
+        repository.addAssignment(ruleClosed.id(), ruleClosed.code(), AssignmentOwnerType.MERCHANT_GROUP, closedGroup.toString(), LimitMode.LIMITED);
+        repository.addAssignment(ruleLive.id(), ruleLive.code(), AssignmentOwnerType.MERCHANT_GROUP, liveGroup.toString(), LimitMode.LIMITED);
+        // Closed before NOW (2026-05-29T10:00:00Z); live membership is open-ended.
+        repository.addMembership(merchantId, closedGroup, Instant.parse("2026-05-20T00:00:00Z"));
+        repository.addMembership(merchantId, liveGroup);
+
+        RuntimeManifest manifest = compiler.compile(Instant.parse("2026-05-29T10:15:00Z"));
+
+        assertThat(manifest.version()).isEqualTo(1);
+        assertThat(repository.manifests).containsExactly(manifest);
+        // Payload still carries BOTH memberships (closed one included) — only the invariant scan filters.
+        assertThat(manifest.membershipCount()).isEqualTo(2);
+        assertThat(manifest.memberships()).hasSize(2);
+    }
+
+    @Test
     void compilesWhenConflictingKindsAreConfinedToASingleGroup() {
         // Same conflicting kinds but both assignments target the SAME group the merchant belongs to:
         // the invariant is about kinds arriving from DIFFERENT groups, so this compiles normally.
@@ -310,13 +336,17 @@ class RuntimeManifestCompilerTest {
         }
 
         RuntimeMerchantGroupMembership addMembership(String merchantId, UUID groupId) {
+            return addMembership(merchantId, groupId, null);
+        }
+
+        RuntimeMerchantGroupMembership addMembership(String merchantId, UUID groupId, Instant validTo) {
             RuntimeMerchantGroupMembership membership = new RuntimeMerchantGroupMembership(
                     UUID.randomUUID(),
                     merchantId,
                     UUID.randomUUID(),
                     groupId,
                     Instant.parse("2026-05-01T00:00:00Z"),
-                    null
+                    validTo
             );
             memberships.add(membership);
             return membership;

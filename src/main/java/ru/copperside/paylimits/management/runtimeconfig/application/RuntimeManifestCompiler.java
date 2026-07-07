@@ -159,7 +159,7 @@ public class RuntimeManifestCompiler {
                         .thenComparing(RuntimeMerchantGroupMembership::validFrom)
                         .thenComparing(membership -> membership.membershipId().toString()))
                 .toList();
-        checkSnapshotInvariant(activeRules, assignments, memberships);
+        checkSnapshotInvariant(activeRules, assignments, memberships, createdAt);
         RuntimeManifestPayload payload = new RuntimeManifestPayload(
                 version,
                 RuntimeManifestStatus.VALID,
@@ -196,11 +196,20 @@ public class RuntimeManifestCompiler {
      * is persisted (last line of defence, spec §3.4). Uses only the data already loaded for this
      * compilation — no additional queries — and, on any conflict, aborts compilation with a 422 so the
      * manifest is never created.
+     *
+     * <p>Only memberships that are active-or-future at {@code compileInstant}
+     * ({@code validTo == null || validTo.isAfter(compileInstant)}) participate in the scan, mirroring
+     * the interactive membership check (which filters {@code valid_to > now}). CLOSED/historical
+     * memberships are excluded here so a merchant's past membership in one group and current
+     * membership in another delivering the same kind is not treated as a simultaneous overlap. This
+     * filtering affects the invariant scan ONLY — the manifest payload (and therefore its checksum)
+     * still carries every membership row returned for compilation, unchanged.
      */
     private void checkSnapshotInvariant(
             List<LimitRule> activeRules,
             List<RuntimeCompiledAssignment> assignments,
-            List<RuntimeMerchantGroupMembership> memberships
+            List<RuntimeMerchantGroupMembership> memberships,
+            Instant compileInstant
     ) {
         Map<UUID, LimitKind> ruleKinds = new HashMap<>();
         for (LimitRule rule : activeRules) {
@@ -212,6 +221,7 @@ public class RuntimeManifestCompiler {
                         UUID.fromString(assignment.ownerId()), assignment.ruleId()))
                 .toList();
         List<SnapshotMembership> snapshotMemberships = memberships.stream()
+                .filter(membership -> membership.validTo() == null || membership.validTo().isAfter(compileInstant))
                 .map(membership -> new SnapshotMembership(membership.merchantId(), membership.groupId()))
                 .toList();
         List<LimitKindConflict> conflicts = LimitKindInvariantChecker.findSnapshotConflicts(

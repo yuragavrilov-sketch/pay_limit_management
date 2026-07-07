@@ -49,6 +49,15 @@ public interface LimitKindInvariantRepository {
     List<MerchantGroupKind> kindsReceivedByMerchantExcludingGroup(String merchantId, UUID excludedGroupId, Instant at);
 
     /**
+     * As {@link #kindsReceivedByMerchantExcludingGroup(String, UUID, Instant)} but excludes a SET of
+     * groups. Used by the membership move flow, where both the requested group and the same-type
+     * predecessor group (which is closed and replaced in the same transaction) must be excluded from
+     * the merchant's currently-received kinds.
+     */
+    List<MerchantGroupKind> kindsReceivedByMerchantExcludingGroups(
+            String merchantId, java.util.Collection<UUID> excludedGroupIds, Instant at);
+
+    /**
      * The groups that have an enabled {@code MERCHANT_GROUP} assignment of the given rule.
      */
     List<UUID> groupsWithEnabledAssignmentForRule(UUID ruleId);

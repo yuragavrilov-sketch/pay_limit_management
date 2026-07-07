@@ -11,6 +11,7 @@ import ru.copperside.paylimits.management.merchantgroup.domain.MerchantGroupType
 import java.time.Clock;
 import java.time.Instant;
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 
 public class MerchantGroupService {
@@ -141,10 +142,22 @@ public class MerchantGroupService {
 
         // Lock (by merchant), the non-overlap invariant check, and the membership write share a
         // single transaction so the advisory lock actually serializes concurrent membership changes
-        // for the same merchant (advisory xact locks release at transaction end).
+        // for the same merchant (advisory xact locks release at transaction end). Ordering matters:
+        // lock -> read the same-type membership that would be replaced -> check (excluding both the
+        // requested group and that soon-to-be-closed predecessor) -> write. A same-type tier move
+        // (G1 -> G2) must not 409 against its own predecessor G1, which replaceExistingMembership
+        // closes, while a conflict with a DIFFERENT group the merchant keeps must still 409.
         return transactionRunner.run(() -> {
-            invariantChecker.checkMembership(merchantId, group.id(), now);
-            return repository.findOverlappingMembership(merchantId, type.id(), validFrom)
+            invariantChecker.lockMerchant(merchantId);
+            Optional<MerchantGroupMembership> overlapping =
+                    repository.findOverlappingMembership(merchantId, type.id(), validFrom);
+            List<UUID> replacedGroups = overlapping
+                    .map(MerchantGroupMembership::groupId)
+                    .filter(existingGroupId -> !existingGroupId.equals(group.id()))
+                    .map(List::of)
+                    .orElseGet(List::of);
+            invariantChecker.checkMembershipUnderLock(merchantId, group.id(), replacedGroups, now);
+            return overlapping
                     .map(existing -> replaceExistingMembership(existing, validFrom, now, actor, membership))
                     .orElseGet(() -> repository.saveMembership(membership));
         });

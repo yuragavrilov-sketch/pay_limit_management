@@ -6,6 +6,7 @@ import ru.copperside.paylimits.management.limitrule.domain.LimitKind;
 
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.LinkedHashSet;
@@ -47,6 +48,48 @@ public class LimitKindInvariantChecker {
         }
         List<MerchantGroupKind> received =
                 repository.kindsReceivedByMerchantExcludingGroup(merchantId, requestedGroupId, at);
+        throwIfConflicting(membershipConflicts(merchantId, requestedGroupId, delivered, received));
+    }
+
+    /**
+     * Acquires the merchant advisory lock, so a caller can read merchant state (e.g. the same-type
+     * membership about to be replaced) under the same lock that guards the subsequent
+     * {@link #checkMembershipUnderLock} check. Only effective inside a transaction (advisory
+     * <b>xact</b> lock releases at transaction end).
+     */
+    public void lockMerchant(String merchantId) {
+        repository.lockMerchant(merchantId);
+    }
+
+    /**
+     * Variant of {@link #checkMembership} that additionally excludes {@code alsoExcludedGroupIds} from
+     * the kinds the merchant currently receives. Used by the same-type tier-move flow (spec MGT-I-19),
+     * where the predecessor group is closed and replaced in the same transaction and so must not count
+     * as a conflicting source. The caller MUST already hold the merchant advisory lock (call
+     * {@link #lockMerchant} first) so the replaced-membership read and this check see one snapshot; a
+     * conflict with any DIFFERENT group the merchant remains in is still reported.
+     */
+    public void checkMembershipUnderLock(
+            String merchantId, UUID requestedGroupId, Collection<UUID> alsoExcludedGroupIds, Instant at) {
+        List<LimitKind> delivered = repository.kindsDeliveredByGroup(requestedGroupId);
+        if (delivered.isEmpty()) {
+            return;
+        }
+        Set<UUID> excluded = new LinkedHashSet<>();
+        excluded.add(requestedGroupId);
+        if (alsoExcludedGroupIds != null) {
+            excluded.addAll(alsoExcludedGroupIds);
+        }
+        List<MerchantGroupKind> received =
+                repository.kindsReceivedByMerchantExcludingGroups(merchantId, excluded, at);
+        throwIfConflicting(membershipConflicts(merchantId, requestedGroupId, delivered, received));
+    }
+
+    private List<LimitKindConflict> membershipConflicts(
+            String merchantId,
+            UUID requestedGroupId,
+            List<LimitKind> delivered,
+            List<MerchantGroupKind> received) {
         List<LimitKindConflict> conflicts = new ArrayList<>();
         for (LimitKind deliveredKind : delivered) {
             for (MerchantGroupKind other : received) {
@@ -56,7 +99,7 @@ public class LimitKindInvariantChecker {
                 }
             }
         }
-        throwIfConflicting(conflicts);
+        return conflicts;
     }
 
     /**
