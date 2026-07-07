@@ -69,15 +69,15 @@ class ManifestDocumentV2MapperTest {
 
         assertThat(rule.has("matcher")).isFalse();
         assertThat(rule.has("operationTypes")).isTrue();
-        assertThat(rule.get("operationTypes").get(0).asText()).isEqualTo("SBP_C2B");
-        assertThat(rule.get("direction").asText()).isEqualTo("IN");
-        assertThat(rule.get("limitTargetType").asText()).isEqualTo("PHONE");
-        assertThat(rule.get("errorMessageTemplate").asText()).isEqualTo("template");
-        assertThat(rule.get("measure").get("metric").asText()).isEqualTo("AMOUNT");
-        assertThat(rule.get("measure").get("currency").asText()).isEqualTo("RUB");
+        assertThat(rule.get("operationTypes").get(0).asText()).isEqualTo("OCT");
+        assertThat(rule.get("direction").asText()).isEqualTo("OUT");
+        assertThat(rule.get("limitTargetType").asText()).isEqualTo("CARD");
+        assertThat(rule.get("errorMessageTemplate").asText()).isEqualTo("Limit exceeded: %d of %f (%s)");
+        assertThat(rule.get("measure").get("metric").asText()).isEqualTo("COUNT");
+        assertThat(rule.get("measure").get("currency").isNull()).isTrue();
         // Money is a decimal string, not a JSON number.
         assertThat(rule.get("limitValue").isTextual()).isTrue();
-        assertThat(rule.get("limitValue").asText()).isEqualTo("1000.00");
+        assertThat(rule.get("limitValue").asText()).isEqualTo("3");
         // attributeSelector is the sole extension beyond §4.3.
         assertThat(rule.get("attributeSelector").get("type").asText()).isEqualTo("NONE");
         assertThat(rule.get("attributeSelector").get("value").isNull()).isTrue();
@@ -161,18 +161,21 @@ class ManifestDocumentV2MapperTest {
     }
 
     private RuntimeManifestPayload samplePayload() {
+        // Card payout daily COUNT limit per target card: OCT is OUT/CARD, matching the rule's
+        // direction and TARGET aggregation scope (validation 4: TARGET scope requires
+        // limitTargetType and a single counterparty equal to it).
         RuntimeCompiledRule rule = new RuntimeCompiledRule(
                 RULE_ID,
                 "PAYOUT-CARD-COUNT-DAY",
                 2,
                 new RuntimeCompiledRule.Matcher(
-                        List.of("SBP_C2B"),
-                        OperationDirection.IN,
+                        List.of("OCT"),
+                        OperationDirection.OUT,
                         new RuleSelector<>(AttributeSelectorType.NONE, null),
-                        LimitTargetType.PHONE),
-                new Measure(RuleMetric.AMOUNT, RulePeriod.DAY, AggregationScope.OWNER, "RUB", null),
-                new BigDecimal("1000.00"),
-                "template");
+                        LimitTargetType.CARD),
+                new Measure(RuleMetric.COUNT, RulePeriod.DAY, AggregationScope.TARGET, null, null),
+                new BigDecimal("3"),
+                "Limit exceeded: %d of %f (%s)");
         RuntimeCompiledAssignment global = new RuntimeCompiledAssignment(
                 GLOBAL_ASSIGNMENT_ID, RULE_ID, "PAYOUT-CARD-COUNT-DAY",
                 AssignmentOwnerType.GLOBAL, null, LimitMode.LIMITED,
@@ -185,7 +188,7 @@ class ManifestDocumentV2MapperTest {
                 MEMBERSHIP_ID, "502118", GROUP_TYPE_ID, GROUP_ID,
                 Instant.parse("2026-07-10T00:00:00Z"), null);
         RuntimeOperationType operationType = new RuntimeOperationType(
-                "SBP_C2B", OperationDirection.IN, CounterpartyType.PHONE);
+                "OCT", OperationDirection.OUT, CounterpartyType.CARD);
         return new RuntimeManifestPayload(
                 2,
                 "Europe/Moscow",

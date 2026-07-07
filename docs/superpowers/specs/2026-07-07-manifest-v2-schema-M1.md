@@ -99,7 +99,7 @@ memberships: []` (MGT-I-11).
 ### 2.1. `operationTypes[]`
 
 ```json
-{"code": "SBP_C2B", "direction": "IN", "counterpartyType": "PHONE"}
+{"code": "OCT", "direction": "OUT", "counterpartyType": "CARD"}
 ```
 
 `direction` ∈ `IN | OUT`. `counterpartyType` ∈ `CARD | PHONE | ACCOUNT`. Список отсортирован по `code`
@@ -113,17 +113,17 @@ memberships: []` (MGT-I-11).
   "code": "PAYOUT-CARD-COUNT-DAY",
   "version": 2,
   "measure": {
-    "metric": "AMOUNT",
+    "metric": "COUNT",
     "period": "DAY",
-    "aggregationScope": "OWNER",
-    "currency": "RUB",
+    "aggregationScope": "TARGET",
+    "currency": null,
     "intervalMinutes": null
   },
-  "limitValue": "1000.00",
-  "operationTypes": ["SBP_C2B"],
-  "direction": "IN",
-  "limitTargetType": "PHONE",
-  "errorMessageTemplate": "template",
+  "limitValue": "3",
+  "operationTypes": ["OCT"],
+  "direction": "OUT",
+  "limitTargetType": "CARD",
+  "errorMessageTemplate": "Limit exceeded: %d of %f (%s)",
   "attributeSelector": {"type": "NONE", "value": null}
 }
 ```
@@ -208,17 +208,18 @@ memberships: []` (MGT-I-11).
 ## 6. Реальный пример канонического JSON (для checksum) и checksum
 
 Пример сгенерирован напрямую из продовых классов (`ManifestDocumentV2Mapper` +
-`RuntimeManifestCanonicalJson`) на representative-данных выше (один AMOUNT-rule без attribute-сужения,
+`RuntimeManifestCanonicalJson`) на representative-данных выше (один COUNT-rule с TARGET-scope без
+attribute-сужения — дневной лимит числа исходящих card-payout операций (`OCT`) на карту-получатель,
 два assignment — GLOBAL и MERCHANT, одно membership, один operationType, `manifestVersion = 42`,
 `effectiveFrom = 2026-07-10T00:00:00Z`). Ключи отсортированы по алфавиту на каждом уровне; ISO-даты;
 явные null; `limitValue` — строка. **`id`/`checksum`/`status`/counts в хешируемый документ не входят.**
 
 ```json
-{"assignments":[{"activeFrom":"2026-07-01T00:00:00Z","activeTo":null,"assignmentId":"7a3bd1a0-0000-4000-8000-000000000003","mode":"LIMITED","owner":{"id":null,"level":"GLOBAL"},"ruleId":"0d9f1c2e-0000-4000-8000-000000000001"},{"activeFrom":"2026-07-05T00:00:00Z","activeTo":null,"assignmentId":"7a3bd1a0-0000-4000-8000-000000000002","mode":"LIMITED","owner":{"id":"502118","level":"MERCHANT"},"ruleId":"0d9f1c2e-0000-4000-8000-000000000001"}],"businessTimezone":"Europe/Moscow","effectiveFrom":"2026-07-10T00:00:00Z","manifestVersion":42,"memberships":[{"activeFrom":"2026-07-10T00:00:00Z","activeTo":null,"groupId":"bbbb2222-0000-4000-8000-000000000006","membershipId":"c1d2e3f4-0000-4000-8000-000000000004","merchantId":"502118"}],"operationTypes":[{"code":"SBP_C2B","counterpartyType":"PHONE","direction":"IN"}],"rules":[{"attributeSelector":{"type":"NONE","value":null},"code":"PAYOUT-CARD-COUNT-DAY","direction":"IN","errorMessageTemplate":"template","limitTargetType":"PHONE","limitValue":"1000.00","measure":{"aggregationScope":"OWNER","currency":"RUB","intervalMinutes":null,"metric":"AMOUNT","period":"DAY"},"operationTypes":["SBP_C2B"],"ruleId":"0d9f1c2e-0000-4000-8000-000000000001","version":2}],"schemaVersion":2}
+{"assignments":[{"activeFrom":"2026-07-01T00:00:00Z","activeTo":null,"assignmentId":"7a3bd1a0-0000-4000-8000-000000000003","mode":"LIMITED","owner":{"id":null,"level":"GLOBAL"},"ruleId":"0d9f1c2e-0000-4000-8000-000000000001"},{"activeFrom":"2026-07-05T00:00:00Z","activeTo":null,"assignmentId":"7a3bd1a0-0000-4000-8000-000000000002","mode":"LIMITED","owner":{"id":"502118","level":"MERCHANT"},"ruleId":"0d9f1c2e-0000-4000-8000-000000000001"}],"businessTimezone":"Europe/Moscow","effectiveFrom":"2026-07-10T00:00:00Z","manifestVersion":42,"memberships":[{"activeFrom":"2026-07-10T00:00:00Z","activeTo":null,"groupId":"bbbb2222-0000-4000-8000-000000000006","membershipId":"c1d2e3f4-0000-4000-8000-000000000004","merchantId":"502118"}],"operationTypes":[{"code":"OCT","counterpartyType":"CARD","direction":"OUT"}],"rules":[{"attributeSelector":{"type":"NONE","value":null},"code":"PAYOUT-CARD-COUNT-DAY","direction":"OUT","errorMessageTemplate":"Limit exceeded: %d of %f (%s)","limitTargetType":"CARD","limitValue":"3","measure":{"aggregationScope":"TARGET","currency":null,"intervalMinutes":null,"metric":"COUNT","period":"DAY"},"operationTypes":["OCT"],"ruleId":"0d9f1c2e-0000-4000-8000-000000000001","version":2}],"schemaVersion":2}
 ```
 
 ```
-checksum = sha256:7d0e128aa99ff74d25e2929201caff81e2690ea47971fcc07cebffc04a081002
+checksum = sha256:8546c2090d819572eac60fa59b14da985a07c59644fc93bcdf3abe33db4ae168
 ```
 
 Поля верхнего уровня документа в хеше (в алфавитном порядке): `assignments, businessTimezone,
