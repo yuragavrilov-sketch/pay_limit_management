@@ -15,7 +15,6 @@ import ru.copperside.paylimits.management.limitrule.domain.AggregationScope;
 import ru.copperside.paylimits.management.limitrule.domain.AttributeSelectorType;
 import ru.copperside.paylimits.management.limitrule.domain.CompiledRule;
 import ru.copperside.paylimits.management.limitrule.domain.LimitRule;
-import ru.copperside.paylimits.management.limitrule.domain.LimitTargetType;
 import ru.copperside.paylimits.management.limitrule.domain.Measure;
 import ru.copperside.paylimits.management.limitrule.domain.OperationDirection;
 import ru.copperside.paylimits.management.limitrule.domain.RuleManifest;
@@ -241,7 +240,8 @@ class PostgresRuleManifestRepositoryIntegrationTest {
                 Set.of("SBP_C2B"),
                 OperationDirection.IN,
                 new Measure(RuleMetric.AMOUNT, RulePeriod.DAY, AggregationScope.OWNER, "RUB", null),
-                LimitTargetType.PHONE,
+                // OWNER scope must not carry a limitTargetType (validation 4 / V13 DB check).
+                null,
                 new BigDecimal("1000.00"),
                 "template",
                 new RuleSelector<>(AttributeSelectorType.NONE, null),

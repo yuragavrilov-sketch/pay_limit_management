@@ -342,7 +342,7 @@ public class LimitRuleService {
             Set<CounterpartyType> counterparties = resolved.stream()
                     .map(OperationType::counterpartyType)
                     .collect(Collectors.toSet());
-            if (counterparties.size() != 1 || !counterparties.iterator().next().name().equals(targetType.name())) {
+            if (counterparties.size() != 1 || !counterpartyMatchesTarget(counterparties.iterator().next(), targetType)) {
                 throw problem("VALIDATION_ERROR",
                         "TARGET rule operationTypes must share a single counterparty equal to limitTargetType");
             }
@@ -369,6 +369,19 @@ public class LimitRuleService {
         Measure normalizedMeasure = new Measure(metric, period, scope, normalizedCurrency, measure.intervalMinutes());
 
         return new ValidatedRuleDefinition(normalizedOperationTypes, normalizedMeasure, normalizedTemplate);
+    }
+
+    /**
+     * Explicit, exhaustive mapping between {@link CounterpartyType} and {@link LimitTargetType}
+     * for validation 4 (TARGET scope). A {@code switch} over both enums makes a future divergence
+     * between the two types a compile error rather than a silent runtime mismatch.
+     */
+    private boolean counterpartyMatchesTarget(CounterpartyType counterpartyType, LimitTargetType targetType) {
+        return switch (counterpartyType) {
+            case CARD -> targetType == LimitTargetType.CARD;
+            case PHONE -> targetType == LimitTargetType.PHONE;
+            case ACCOUNT -> targetType == LimitTargetType.ACCOUNT;
+        };
     }
 
     /**

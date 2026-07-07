@@ -243,7 +243,7 @@ class MerchantGroupSchemaIntegrationTest {
                      limit_value, error_message_template,
                      status, created_at, updated_at, activated_at, disabled_at)
                 values (?, 'RULE_SBP_C2B_DAY', 1, 'SBP C2B daily amount', 'IN',
-                        'NONE', null, 'PHONE', 'AMOUNT', 'DAY', 'OWNER', 'RUB', null,
+                        'NONE', null, null, 'AMOUNT', 'DAY', 'OWNER', 'RUB', null,
                         1000.00, 'template', 'ACTIVE', now(), now(), now(), null)
                 """, UUID.randomUUID());
 
@@ -255,7 +255,7 @@ class MerchantGroupSchemaIntegrationTest {
                      limit_value, error_message_template,
                      status, created_at, updated_at, activated_at, disabled_at)
                 values (?, 'RULE_SBP_C2B_DAY', 2, 'SBP C2B daily amount v2', 'IN',
-                        'NONE', null, 'PHONE', 'AMOUNT', 'DAY', 'OWNER', 'RUB', null,
+                        'NONE', null, null, 'AMOUNT', 'DAY', 'OWNER', 'RUB', null,
                         1000.00, 'template', 'ACTIVE', now(), now(), now(), null)
                 """, UUID.randomUUID()))
                 .isInstanceOf(DataIntegrityViolationException.class)

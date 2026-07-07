@@ -55,7 +55,7 @@ public class GlobalExceptionHandler {
         HttpStatus status = switch (ex.code()) {
             case "OPERATION_TYPE_NOT_FOUND", "RULE_NOT_FOUND" -> HttpStatus.NOT_FOUND;
             case "INVALID_RULE_DEFINITION", "RULE_SELECTOR_INVALID", "VALIDATION_ERROR",
-                 "OPERATION_TYPE_INVALID_DIRECTION" -> HttpStatus.BAD_REQUEST;
+                 "OPERATION_TYPE_INVALID_DIRECTION", "OPERATION_TYPE_DISABLED" -> HttpStatus.BAD_REQUEST;
             default -> HttpStatus.CONFLICT;
         };
         return problem(status, ex.code(), "Limit rule problem", ex.getMessage());

@@ -26,6 +26,14 @@ import java.util.UUID;
 @ConditionalOnExpression("!'${spring.autoconfigure.exclude:}'.contains('DataSourceAutoConfiguration')")
 public class PostgresLimitKindInvariantRepository implements LimitKindInvariantRepository {
 
+    /**
+     * Distinct advisory-lock namespaces (first arg to the two-arg
+     * {@code pg_advisory_xact_lock(int, int)} form) so merchant-keyed and rule-keyed locks live in
+     * disjoint 32-bit keyspaces and cannot spuriously collide across domains.
+     */
+    private static final int MERCHANT_LOCK_NAMESPACE = 1;
+    private static final int RULE_LOCK_NAMESPACE = 2;
+
     private final JdbcTemplate jdbcTemplate;
 
     public PostgresLimitKindInvariantRepository(JdbcTemplate jdbcTemplate) {
@@ -34,12 +42,14 @@ public class PostgresLimitKindInvariantRepository implements LimitKindInvariantR
 
     @Override
     public void lockMerchant(String merchantId) {
-        jdbcTemplate.query("select pg_advisory_xact_lock(hashtext(?))", (ResultSet rs) -> null, merchantId);
+        jdbcTemplate.query("select pg_advisory_xact_lock(?, hashtext(?))", (ResultSet rs) -> null,
+                MERCHANT_LOCK_NAMESPACE, merchantId);
     }
 
     @Override
     public void lockRule(UUID ruleId) {
-        jdbcTemplate.query("select pg_advisory_xact_lock(hashtext(?))", (ResultSet rs) -> null, ruleId.toString());
+        jdbcTemplate.query("select pg_advisory_xact_lock(?, hashtext(?))", (ResultSet rs) -> null,
+                RULE_LOCK_NAMESPACE, ruleId.toString());
     }
 
     @Override

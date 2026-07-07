@@ -190,6 +190,36 @@ class PostgresLimitRuleRepositoryIntegrationTest {
     }
 
     @Test
+    void rejectsOwnerScopeRuleWithTargetTypeViaDbCheck() {
+        // App-level validation 4 already forbids this combination (LimitRuleService); this test
+        // proves the V13 defense-in-depth CHECK independently rejects it at the DB layer too, in
+        // case a caller bypasses the service (e.g. a future direct repository write).
+        Instant now = Instant.parse("2026-05-27T09:00:00Z");
+        LimitRule ownerScopeWithTarget = new LimitRule(
+                UUID.randomUUID(),
+                "RULE_OWNER_SCOPE_WITH_TARGET",
+                1,
+                "RULE_OWNER_SCOPE_WITH_TARGET",
+                Set.of("SBP_C2B"),
+                OperationDirection.IN,
+                new Measure(RuleMetric.AMOUNT, RulePeriod.DAY, AggregationScope.OWNER, "RUB", null),
+                LimitTargetType.PHONE,
+                new BigDecimal("1000.00"),
+                "template",
+                noneSelector(),
+                RuleStatus.DRAFT,
+                now,
+                now,
+                null,
+                null
+        );
+
+        assertThatThrownBy(() -> repository.saveRule(ownerScopeWithTarget))
+                .isInstanceOf(LimitRuleProblemException.class)
+                .hasMessageContaining("INVALID_RULE_DEFINITION");
+    }
+
+    @Test
     void savesAndReadsBackIntervalRule() {
         Instant now = Instant.parse("2026-05-27T09:00:00Z");
         LimitRule draft = new LimitRule(
@@ -255,7 +285,8 @@ class PostgresLimitRuleRepositoryIntegrationTest {
                 operationTypes,
                 direction,
                 new Measure(metric, RulePeriod.DAY, AggregationScope.OWNER, currency, null),
-                LimitTargetType.PHONE,
+                // OWNER scope must not carry a limitTargetType (validation 4 / V13 DB check).
+                null,
                 new BigDecimal("1000.00"),
                 "template",
                 attributeSelector,

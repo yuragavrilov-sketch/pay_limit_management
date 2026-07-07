@@ -211,7 +211,8 @@ class GlobalAssignmentManifestIntegrationTest {
                 ruleId, code, code, direction.name(),
                 targetType == null ? null : targetType.name(),
                 metric.name(), period == null ? null : period.name(),
-                interval ? "TARGET" : "OWNER",
+                // Scope must be TARGET whenever a targetType is carried (V13 DB check).
+                (interval || targetType != null) ? "TARGET" : "OWNER",
                 interval ? null : "RUB",
                 interval ? 15 : null,
                 interval ? null : BigDecimal.valueOf(1000),

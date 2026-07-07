@@ -217,6 +217,29 @@ class LimitRuleControllerTest {
     }
 
     @Test
+    void rejectsRuleReferencingDisabledOperationType() throws Exception {
+        repository.addOperationType("SBP_C2B_DISABLED", OperationDirection.IN, false);
+
+        mockMvc.perform(post("/internal/v1/limit-management/rules")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "code": "RULE_DISABLED_TYPE",
+                                  "name": "References a disabled operation type",
+                                  "operationTypes": ["SBP_C2B_DISABLED"],
+                                  "direction": "IN",
+                                  "measure": { "metric": "AMOUNT", "period": "DAY", "aggregationScope": "OWNER", "currency": "RUB" },
+                                  "limitValue": "1000.00",
+                                  "errorMessageTemplate": "Limit exceeded",
+                                  "attributeSelector": { "type": "NONE", "value": null }
+                                }
+                                """))
+                // OPERATION_TYPE_DISABLED is a validation error (bad input), not a conflict.
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error.code").value("OPERATION_TYPE_DISABLED"));
+    }
+
+    @Test
     void listsRules() throws Exception {
         repository.addDraftRule("RULE_SBP_C2B_DAY");
 

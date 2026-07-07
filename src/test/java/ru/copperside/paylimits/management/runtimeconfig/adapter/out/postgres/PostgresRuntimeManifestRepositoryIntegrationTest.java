@@ -192,7 +192,7 @@ class PostgresRuntimeManifestRepositoryIntegrationTest {
                      limit_value, error_message_template,
                      status, created_at, updated_at, activated_at, disabled_at)
                 values (?, ?, 1, ?, 'IN',
-                        'NONE', null, 'PHONE',
+                        'NONE', null, null,
                         'AMOUNT', 'DAY', 'OWNER', 'RUB', null,
                         1000.00, 'template',
                         'ACTIVE', now(), now(), now(), null)
@@ -312,7 +312,7 @@ class PostgresRuntimeManifestRepositoryIntegrationTest {
                      limit_value, error_message_template,
                      status, created_at, updated_at, activated_at, disabled_at)
                 values (?, ?, 1, ?, 'IN',
-                        'NONE', null, 'PHONE',
+                        'NONE', null, null,
                         'AMOUNT', 'DAY', 'OWNER', 'RUB', null,
                         1000.00, 'template',
                         'ACTIVE', now(), now(), now(), null)

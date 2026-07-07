@@ -278,13 +278,16 @@ class LimitKindInvariantConcurrencyIntegrationTest {
                      status, created_at, updated_at, activated_at, disabled_at)
                 values (?, ?, 1, ?, ?,
                         'NONE', null, ?,
-                        ?, ?, 'OWNER', 'RUB', null,
+                        ?, ?, ?, 'RUB', null,
                         ?, 'template',
                         ?, now(), now(), ?, null)
                 """,
                 ruleId, code, code, direction.name(),
                 targetType == null ? null : targetType.name(),
                 metric.name(), period == null ? null : period.name(),
+                // Scope must be TARGET whenever a targetType is carried (V13 DB check); every fixture
+                // here passes a non-null targetType.
+                targetType != null ? "TARGET" : "OWNER",
                 BigDecimal.valueOf(1000),
                 status,
                 activated ? Timestamp.from(PAST) : null);
