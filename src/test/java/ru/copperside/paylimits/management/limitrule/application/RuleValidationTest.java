@@ -76,7 +76,8 @@ class RuleValidationTest {
         var cmd = create(Set.of("SBP_B2C"), OperationDirection.OUT,
                 new Measure(RuleMetric.INTERVAL, null, AggregationScope.OWNER, null, 5),
                 null, null);
-        assertThatThrownBy(() -> service.createRule(cmd));
+        assertThatThrownBy(() -> service.createRule(cmd))
+                .isInstanceOf(LimitRuleProblemException.class);
     }
 
     // MGT-U-03: operationTypes not matching direction -> 400
@@ -85,7 +86,8 @@ class RuleValidationTest {
         var cmd = create(Set.of("OCT"), OperationDirection.IN,
                 new Measure(RuleMetric.AMOUNT, RulePeriod.DAY, AggregationScope.OWNER, "RUB", null),
                 null, new BigDecimal("100"));
-        assertThatThrownBy(() -> service.createRule(cmd));
+        assertThatThrownBy(() -> service.createRule(cmd))
+                .isInstanceOf(LimitRuleProblemException.class);
     }
 
     // MGT-U-04: TARGET rule mixing counterparties (OCT card + SBP_B2C phone) -> 400
@@ -94,7 +96,8 @@ class RuleValidationTest {
         var cmd = create(Set.of("OCT", "SBP_B2C"), OperationDirection.OUT,
                 new Measure(RuleMetric.COUNT, RulePeriod.DAY, AggregationScope.TARGET, null, null),
                 LimitTargetType.CARD, new BigDecimal("3"));
-        assertThatThrownBy(() -> service.createRule(cmd));
+        assertThatThrownBy(() -> service.createRule(cmd))
+                .isInstanceOf(LimitRuleProblemException.class);
     }
 
     // MGT-U-05: errorMessageTemplate with a bad placeholder (not %d/%f/%s) -> 400
@@ -108,12 +111,60 @@ class RuleValidationTest {
                 .isInstanceOf(LimitRuleProblemException.class);
     }
 
+    // Regression: a trailing '%' with no following character must be rejected, not silently
+    // skipped by the placeholder scan.
+    @Test
+    void rejectsErrorTemplateWithTrailingPercent() {
+        var cmd = new CreateLimitRuleCommand("R", "name", Set.of("OCT"), OperationDirection.OUT,
+                new Measure(RuleMetric.AMOUNT, RulePeriod.PER_OPERATION, null, "RUB", null),
+                null, new BigDecimal("600000"),
+                "trailing%", new RuleSelector<>(AttributeSelectorType.NONE, null));
+        assertThatThrownBy(() -> service.createRule(cmd))
+                .isInstanceOf(LimitRuleProblemException.class)
+                .extracting("code").isEqualTo("VALIDATION_ERROR");
+    }
+
+    // Regression: a bare/dangling '%' at the end of the template (after a space) must be rejected.
+    @Test
+    void rejectsErrorTemplateWithDanglingPercent() {
+        var cmd = new CreateLimitRuleCommand("R", "name", Set.of("OCT"), OperationDirection.OUT,
+                new Measure(RuleMetric.AMOUNT, RulePeriod.PER_OPERATION, null, "RUB", null),
+                null, new BigDecimal("600000"),
+                "Bad %", new RuleSelector<>(AttributeSelectorType.NONE, null));
+        assertThatThrownBy(() -> service.createRule(cmd))
+                .isInstanceOf(LimitRuleProblemException.class)
+                .extracting("code").isEqualTo("VALIDATION_ERROR");
+    }
+
+    // Regression: %% (escaped literal percent) combined with all supported placeholders is accepted.
+    @Test
+    void acceptsErrorTemplateWithEscapedPercentAndAllPlaceholders() {
+        var cmd = new CreateLimitRuleCommand("R", "name", Set.of("OCT"), OperationDirection.OUT,
+                new Measure(RuleMetric.AMOUNT, RulePeriod.PER_OPERATION, null, "RUB", null),
+                null, new BigDecimal("600000"),
+                "%% escaped, limit %d used %f left %s", new RuleSelector<>(AttributeSelectorType.NONE, null));
+        when(repository.saveRule(any())).thenAnswer(inv -> inv.getArgument(0));
+        assertThat(service.createRule(cmd).code()).isEqualTo("R");
+    }
+
     @Test
     void acceptsValidPerOperationAmountRule() {
         var cmd = new CreateLimitRuleCommand("R", "name", Set.of("OCT", "SBP_B2C"), OperationDirection.OUT,
                 new Measure(RuleMetric.AMOUNT, RulePeriod.PER_OPERATION, null, "RUB", null),
                 null, new BigDecimal("600000"),
                 "Лимит %d использовано %f сумма %s", new RuleSelector<>(AttributeSelectorType.NONE, null));
+        when(repository.saveRule(any())).thenAnswer(inv -> inv.getArgument(0));
+        assertThat(service.createRule(cmd).code()).isEqualTo("R");
+    }
+
+    // Closes a coverage gap: INTERVAL rules were previously only exercised at the repository
+    // layer, not through service-level validation. Confirms a valid INTERVAL rule passes.
+    @Test
+    void acceptsValidIntervalRule() {
+        var cmd = new CreateLimitRuleCommand("R", "name", Set.of("SBP_B2C"), OperationDirection.OUT,
+                new Measure(RuleMetric.INTERVAL, null, AggregationScope.TARGET, null, 15),
+                LimitTargetType.PHONE, null,
+                "Лимит %d использовано %f значение %s", new RuleSelector<>(AttributeSelectorType.NONE, null));
         when(repository.saveRule(any())).thenAnswer(inv -> inv.getArgument(0));
         assertThat(service.createRule(cmd).code()).isEqualTo("R");
     }

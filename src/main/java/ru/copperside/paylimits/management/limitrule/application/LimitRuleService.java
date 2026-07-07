@@ -25,8 +25,6 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Set;
 import java.util.UUID;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 public class LimitRuleService {
@@ -375,16 +373,20 @@ public class LimitRuleService {
         return resolved;
     }
 
-    private static final Pattern TEMPLATE_PLACEHOLDER = Pattern.compile("%(.)");
     private static final Set<String> SUPPORTED_TEMPLATE_PLACEHOLDERS = Set.of("d", "f", "s", "%");
 
     private String validateErrorTemplate(String template) {
         String normalized = requireText(template, "errorMessageTemplate");
-        Matcher matcher = TEMPLATE_PLACEHOLDER.matcher(normalized);
-        while (matcher.find()) {
-            String token = matcher.group(1);
-            if (!SUPPORTED_TEMPLATE_PLACEHOLDERS.contains(token)) {
-                throw problem("VALIDATION_ERROR", "errorMessageTemplate contains unsupported placeholder %" + token);
+        for (int i = 0; i < normalized.length(); i++) {
+            if (normalized.charAt(i) == '%') {
+                if (i + 1 >= normalized.length()) {
+                    throw problem("VALIDATION_ERROR", "errorMessageTemplate ends with a dangling '%'");
+                }
+                String token = String.valueOf(normalized.charAt(i + 1));
+                if (!SUPPORTED_TEMPLATE_PLACEHOLDERS.contains(token)) {
+                    throw problem("VALIDATION_ERROR", "errorMessageTemplate contains unsupported placeholder %" + token);
+                }
+                i++; // consume the placeholder char (handles %% correctly)
             }
         }
         return normalized;
