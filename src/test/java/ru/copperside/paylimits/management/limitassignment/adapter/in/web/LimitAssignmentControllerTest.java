@@ -191,6 +191,36 @@ class LimitAssignmentControllerTest {
                 .andExpect(jsonPath("$.error.code").value("ASSIGNMENT_CONFLICT"));
     }
 
+    @Test
+    void mapsOverlappingGlobalAssignmentToConflictProblem() throws Exception {
+        mockMvc.perform(post("/internal/v1/limit-management/assignments")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "ruleId": "0db59f6a-7f8c-45d6-b6a7-cc1fcb397c6e",
+                                  "ownerType": "GLOBAL",
+                                  "limitMode": "UNLIMITED",
+                                  "validFrom": "2026-05-29T00:00:00Z",
+                                  "validTo": null
+                                }
+                                """))
+                .andExpect(status().isOk());
+
+        mockMvc.perform(post("/internal/v1/limit-management/assignments")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "ruleId": "0db59f6a-7f8c-45d6-b6a7-cc1fcb397c6e",
+                                  "ownerType": "GLOBAL",
+                                  "limitMode": "BLOCKED",
+                                  "validFrom": "2026-05-30T00:00:00Z",
+                                  "validTo": null
+                                }
+                                """))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.error.code").value("ASSIGNMENT_CONFLICT"));
+    }
+
     @TestConfiguration(proxyBeanMethods = false)
     static class TestSupport {
 

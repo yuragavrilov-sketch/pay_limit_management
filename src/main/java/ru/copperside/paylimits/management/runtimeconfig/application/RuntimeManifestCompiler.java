@@ -150,7 +150,8 @@ public class RuntimeManifestCompiler {
         List<RuntimeCompiledAssignment> assignments = repository.listEnabledAssignmentsForCompilation().stream()
                 .sorted(Comparator.comparing(RuntimeCompiledAssignment::ruleCode)
                         .thenComparing(assignment -> assignment.ownerType().name())
-                        .thenComparing(RuntimeCompiledAssignment::ownerId)
+                        .thenComparing(RuntimeCompiledAssignment::ownerId,
+                                Comparator.nullsFirst(Comparator.naturalOrder()))
                         .thenComparing(assignment -> assignment.assignmentId().toString()))
                 .toList();
         List<RuntimeMerchantGroupMembership> memberships = repository.listMembershipsForCompilation().stream()

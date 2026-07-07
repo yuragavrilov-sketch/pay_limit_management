@@ -12,6 +12,7 @@ import ru.copperside.paylimits.management.limitassignment.domain.RuleReference;
 
 import java.time.Clock;
 import java.time.Instant;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -171,8 +172,12 @@ public class LimitAssignmentService {
             return;
         }
         if (repository.hasEnabledOverlap(excludedAssignmentId, ruleId, ownerType, ownerId, validFrom, validTo)) {
+            Map<String, Object> details = new LinkedHashMap<>();
+            details.put("ruleId", ruleId);
+            details.put("ownerType", ownerType);
+            details.put("ownerId", ownerId);
             throw problem("ASSIGNMENT_CONFLICT", "Enabled assignments for the same rule and owner must not overlap",
-                    Map.of("ruleId", ruleId, "ownerType", ownerType, "ownerId", ownerId));
+                    details);
         }
     }
 

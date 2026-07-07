@@ -172,6 +172,32 @@ class LimitAssignmentServiceTest {
     }
 
     @Test
+    void rejectsOverlappingEnabledGlobalAssignmentForSameRule() {
+        UUID ruleId = repository.addRule(true);
+        service.createAssignment(new CreateLimitAssignmentCommand(
+                ruleId,
+                AssignmentOwnerType.GLOBAL,
+                null,
+                LimitMode.UNLIMITED,
+                Instant.parse("2026-05-29T12:00:00Z"),
+                null
+        ));
+
+        LimitAssignmentProblemException thrown = org.junit.jupiter.api.Assertions.assertThrows(
+                LimitAssignmentProblemException.class,
+                () -> service.createAssignment(new CreateLimitAssignmentCommand(
+                        ruleId,
+                        AssignmentOwnerType.GLOBAL,
+                        null,
+                        LimitMode.BLOCKED,
+                        Instant.parse("2026-05-30T12:00:00Z"),
+                        null
+                )));
+
+        assertThat(thrown.code()).isEqualTo("ASSIGNMENT_CONFLICT");
+    }
+
+    @Test
     void allowsAdjacentAssignmentPeriodsForSameRuleAndOwner() {
         UUID ruleId = repository.addRule(true);
         repository.addAssignment(ruleId, AssignmentOwnerType.MERCHANT, "502118",
