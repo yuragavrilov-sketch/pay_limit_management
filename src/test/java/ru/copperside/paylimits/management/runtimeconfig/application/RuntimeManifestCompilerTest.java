@@ -81,6 +81,38 @@ class RuntimeManifestCompilerTest {
     }
 
     @Test
+    void includesGlobalAssignmentInCompiledManifestWithNullOwnerId() {
+        LimitRule rule = repository.addActiveRule("RULE_GLOBAL_INCLUDE");
+        RuntimeCompiledAssignment globalAssignment = repository.addAssignment(
+                rule.id(), rule.code(), AssignmentOwnerType.GLOBAL, null, LimitMode.LIMITED);
+
+        RuntimeManifest manifest = compiler.compile(Instant.parse("2026-05-29T10:15:00Z"));
+
+        assertThat(manifest.assignments()).containsExactly(globalAssignment);
+        assertThat(manifest.assignments().getFirst().ownerType()).isEqualTo(AssignmentOwnerType.GLOBAL);
+        assertThat(manifest.assignments().getFirst().ownerId()).isNull();
+        assertThat(manifest.checksum()).isEqualTo(new RuntimeManifestCanonicalJson().checksum(manifest.payload()));
+    }
+
+    @Test
+    void sortsTwoEnabledGlobalAssignmentsOfSameRuleWithoutNpeOnNullOwnerId() {
+        // Regression coverage at the compiler level for the null-safe ownerId comparator: two enabled
+        // GLOBAL assignments of the SAME rule tie on ruleCode and ownerType, forcing the sort to compare
+        // ownerId (null on both sides). Fixed defensively in commit 3b3acf1; this test pins it.
+        LimitRule rule = repository.addActiveRule("RULE_GLOBAL_SORT");
+        RuntimeCompiledAssignment first = repository.addAssignment(
+                rule.id(), rule.code(), AssignmentOwnerType.GLOBAL, null, LimitMode.LIMITED);
+        RuntimeCompiledAssignment second = repository.addAssignment(
+                rule.id(), rule.code(), AssignmentOwnerType.GLOBAL, null, LimitMode.BLOCKED);
+
+        RuntimeManifest manifest = compiler.compile(Instant.parse("2026-05-29T10:15:00Z"));
+
+        assertThat(manifest.assignments()).containsExactlyInAnyOrder(first, second);
+        assertThat(manifest.assignments())
+                .allSatisfy(assignment -> assertThat(assignment.ownerType()).isEqualTo(AssignmentOwnerType.GLOBAL));
+    }
+
+    @Test
     void carriesRuleOperationTypesSortedInMatcher() {
         repository.addActiveRule(
                 "RULE_SBP_PHONE_DAY",

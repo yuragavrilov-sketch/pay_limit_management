@@ -139,6 +139,48 @@ class PostgresRuntimeManifestRepositoryIntegrationTest {
         assertThat(repository.findEffectiveManifest(Instant.parse("2026-01-01T00:00:00Z"))).isEmpty();
     }
 
+    @Test
+    void listEnabledAssignmentsForCompilationIncludesGlobalWithNullOwnerId() {
+        UUID ruleId = UUID.randomUUID();
+        String ruleCode = "RULE_RUNTIME_GLOBAL";
+        jdbcTemplate.update("""
+                insert into limit_management.limit_rules
+                    (id, code, version, name, direction,
+                     attribute_selector_type, attribute_selector_value, target_type,
+                     metric, period, aggregation_scope, currency, interval_minutes,
+                     limit_value, error_message_template,
+                     status, created_at, updated_at, activated_at, disabled_at)
+                values (?, ?, 1, ?, 'IN',
+                        'NONE', null, 'PHONE',
+                        'AMOUNT', 'DAY', 'OWNER', 'RUB', null,
+                        1000.00, 'template',
+                        'ACTIVE', now(), now(), now(), null)
+                """, ruleId, ruleCode, ruleCode);
+        jdbcTemplate.update("""
+                insert into limit_management.limit_rule_operation_type (rule_id, operation_type_code)
+                values (?, 'SBP_C2B')
+                """, ruleId);
+        UUID assignmentId = UUID.randomUUID();
+        jdbcTemplate.update("""
+                insert into limit_management.limit_assignments
+                    (id, rule_id, owner_type, owner_id, limit_mode,
+                     valid_from, valid_to, enabled, created_at, updated_at)
+                values (?, ?, 'GLOBAL', null, 'LIMITED',
+                        ?, null, true, now(), now())
+                """, assignmentId, ruleId, Timestamp.from(Instant.parse("2026-05-29T00:00:00Z")));
+
+        List<RuntimeCompiledAssignment> assignments = repository.listEnabledAssignmentsForCompilation();
+
+        assertThat(assignments)
+                .filteredOn(assignment -> assignment.assignmentId().equals(assignmentId))
+                .singleElement()
+                .satisfies(assignment -> {
+                    assertThat(assignment.ownerType()).isEqualTo(AssignmentOwnerType.GLOBAL);
+                    assertThat(assignment.ownerId()).isNull();
+                    assertThat(assignment.ruleCode()).isEqualTo(ruleCode);
+                });
+    }
+
     private RuntimeManifest manifest(int version, SnapshotIds ids, Instant createdAt, Instant effectiveFrom) {
         List<RuntimeCompiledRule> rules = List.of(compiledRule(ids.ruleId(), ids.ruleCode()));
         List<RuntimeCompiledAssignment> assignments = List.of(new RuntimeCompiledAssignment(
