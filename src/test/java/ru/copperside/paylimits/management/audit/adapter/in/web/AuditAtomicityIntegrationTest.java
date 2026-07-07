@@ -78,6 +78,10 @@ class AuditAtomicityIntegrationTest {
     void clean() {
         auditRepository.setFail(false);
         jdbcTemplate.update("delete from limit_management.audit_event");
+        // limit_rule_operation_type.operation_type_code has no ON DELETE CASCADE (V3), so seeded
+        // rule/operation-type links (e.g. V15's DRAFT-group seed referencing OCT/SBP_B2C) must be
+        // cleared before operation_types or the delete below 409s on the FK.
+        jdbcTemplate.update("delete from limit_management.limit_rule_operation_type");
         jdbcTemplate.update("delete from limit_management.operation_types");
     }
 

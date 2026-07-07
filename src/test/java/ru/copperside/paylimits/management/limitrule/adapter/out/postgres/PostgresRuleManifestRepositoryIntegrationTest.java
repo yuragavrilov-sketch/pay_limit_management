@@ -66,6 +66,10 @@ class PostgresRuleManifestRepositoryIntegrationTest {
     void cleanMutableTables() {
         jdbcTemplate.update("delete from limit_management.rule_manifest_rules");
         jdbcTemplate.update("delete from limit_management.rule_manifests");
+        // limit_assignments.rule_id has no ON DELETE CASCADE (V5), so seeded/test assignment rows
+        // (e.g. V15's DRAFT-group seed) must be cleared before limit_rules or the delete below 409s
+        // on the FK. limit_rule_operation_type cascades automatically (rule_id ON DELETE CASCADE, V3).
+        jdbcTemplate.update("delete from limit_management.limit_assignments");
         jdbcTemplate.update("delete from limit_management.limit_rules");
     }
 
