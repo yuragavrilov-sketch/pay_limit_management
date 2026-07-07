@@ -315,7 +315,9 @@ public class LimitRuleService {
             }
         }
 
-        // Validation 4: TARGET scope requires a single counterparty type matching limitTargetType.
+        // Validation 4: TARGET scope requires a single counterparty type matching limitTargetType;
+        // any other scope (OWNER; PER_OPERATION is already rejected by validation 1) must not
+        // carry a limitTargetType at all.
         if (scope == AggregationScope.TARGET) {
             if (targetType == null) {
                 throw problem("VALIDATION_ERROR", "TARGET scope requires limitTargetType");
@@ -327,6 +329,8 @@ public class LimitRuleService {
                 throw problem("VALIDATION_ERROR",
                         "TARGET rule operationTypes must share a single counterparty equal to limitTargetType");
             }
+        } else if (targetType != null) {
+            throw problem("VALIDATION_ERROR", "limitTargetType must be null unless aggregationScope=TARGET");
         }
 
         // Currency: AMOUNT rules require RUB (normalized on save); other metrics must not define one.

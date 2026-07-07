@@ -175,7 +175,6 @@ class LimitRuleControllerTest {
                                     "aggregationScope": "OWNER",
                                     "currency": "RUB"
                                   },
-                                  "limitTargetType": "PHONE",
                                   "limitValue": "1000.00",
                                   "errorMessageTemplate": "Limit exceeded",
                                   "attributeSelector": { "type": "PAYMENT_SYSTEM", "value": "MIR" }
@@ -190,7 +189,8 @@ class LimitRuleControllerTest {
                 .andExpect(jsonPath("$.data.measure.currency").value("RUB"))
                 .andExpect(jsonPath("$.data.attributeSelector.type").value("PAYMENT_SYSTEM"))
                 .andExpect(jsonPath("$.data.attributeSelector.value").value("MIR"))
-                .andExpect(jsonPath("$.data.limitTargetType").value("PHONE"))
+                // OWNER-scope rules must not carry a limitTargetType (validation 4).
+                .andExpect(jsonPath("$.data.limitTargetType").value(nullValue()))
                 .andExpect(jsonPath("$.data.limitValue").value("1000.00"))
                 .andExpect(jsonPath("$.data.enabled").value(false));
     }
@@ -361,7 +361,7 @@ class LimitRuleControllerTest {
                     Set.of("SBP_C2B"),
                     OperationDirection.IN,
                     new Measure(RuleMetric.AMOUNT, RulePeriod.DAY, AggregationScope.OWNER, "RUB", null),
-                    LimitTargetType.PHONE,
+                    null,
                     new BigDecimal("1000.00"),
                     "template",
                     new RuleSelector<>(AttributeSelectorType.NONE, null),

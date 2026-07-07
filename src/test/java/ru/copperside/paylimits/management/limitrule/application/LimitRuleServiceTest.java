@@ -154,7 +154,8 @@ class LimitRuleServiceTest {
         assertThat(rule.operationTypes()).containsExactly("SBP_C2B");
         assertThat(rule.direction()).isEqualTo(OperationDirection.IN);
         assertThat(rule.attributeSelector()).isEqualTo(noneSelector());
-        assertThat(rule.limitTargetType()).isEqualTo(LimitTargetType.PHONE);
+        // OWNER-scope rules must not carry a limitTargetType (validation 4).
+        assertThat(rule.limitTargetType()).isNull();
         assertThat(rule.measure().metric()).isEqualTo(RuleMetric.AMOUNT);
         assertThat(rule.limitValue()).isEqualByComparingTo("1000.00");
         assertThat(rule.errorMessageTemplate()).isEqualTo("template");
@@ -171,7 +172,7 @@ class LimitRuleServiceTest {
                 Set.of("SBP_C2B", "SBP_B2B_IN"),
                 OperationDirection.IN,
                 new Measure(RuleMetric.AMOUNT, RulePeriod.DAY, AggregationScope.OWNER, "RUB", null),
-                LimitTargetType.PHONE,
+                null,
                 new BigDecimal("1000.00"),
                 "template",
                 new RuleSelector<>(AttributeSelectorType.PAYMENT_SYSTEM, "MIR")
@@ -204,7 +205,7 @@ class LimitRuleServiceTest {
                 Set.of("SBP_C2B"),
                 OperationDirection.IN,
                 new Measure(RuleMetric.AMOUNT, RulePeriod.DAY, AggregationScope.OWNER, "RUB", null),
-                LimitTargetType.CARD,
+                null,
                 new BigDecimal("1000.00"),
                 "template",
                 new RuleSelector<>(AttributeSelectorType.PAYMENT_SYSTEM, "UNKNOWN")
@@ -249,7 +250,7 @@ class LimitRuleServiceTest {
                 Set.of("SBP_B2C"),
                 OperationDirection.OUT,
                 new Measure(RuleMetric.COUNT, RulePeriod.MONTH, AggregationScope.OWNER, null, null),
-                LimitTargetType.PHONE,
+                null,
                 new BigDecimal("5"),
                 "template",
                 noneSelector()
@@ -365,7 +366,7 @@ class LimitRuleServiceTest {
                 operationTypes,
                 direction,
                 new Measure(RuleMetric.AMOUNT, RulePeriod.DAY, AggregationScope.OWNER, "RUB", null),
-                LimitTargetType.PHONE,
+                null,
                 new BigDecimal("1000.00"),
                 "template",
                 noneSelector()

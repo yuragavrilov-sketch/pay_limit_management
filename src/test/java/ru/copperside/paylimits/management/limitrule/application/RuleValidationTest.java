@@ -190,6 +190,28 @@ class RuleValidationTest {
                 .extracting("code").isEqualTo("OPERATION_TYPE_DISABLED");
     }
 
+    // Validation 4 (extended): OWNER-scope rules must not carry a limitTargetType.
+    @Test
+    void rejectsOwnerScopeAmountRuleWithLimitTargetType() {
+        var cmd = create(Set.of("OCT"), OperationDirection.OUT,
+                new Measure(RuleMetric.AMOUNT, RulePeriod.DAY, AggregationScope.OWNER, "RUB", null),
+                LimitTargetType.CARD, new BigDecimal("100"));
+        assertThatThrownBy(() -> service.createRule(cmd))
+                .isInstanceOf(LimitRuleProblemException.class)
+                .extracting("code").isEqualTo("VALIDATION_ERROR");
+    }
+
+    // Companion to the rejection above: the same OWNER-scope AMOUNT rule with limitTargetType=null
+    // must still be accepted.
+    @Test
+    void acceptsValidOwnerScopeAmountRule() {
+        var cmd = create(Set.of("OCT"), OperationDirection.OUT,
+                new Measure(RuleMetric.AMOUNT, RulePeriod.DAY, AggregationScope.OWNER, "RUB", null),
+                null, new BigDecimal("100"));
+        when(repository.saveRule(any())).thenAnswer(inv -> inv.getArgument(0));
+        assertThat(service.createRule(cmd).code()).isEqualTo("R");
+    }
+
     private CreateLimitRuleCommand create(Set<String> ops, OperationDirection dir, Measure m,
                                           LimitTargetType target, BigDecimal value) {
         return new CreateLimitRuleCommand("R", "name", ops, dir, m, target, value,
