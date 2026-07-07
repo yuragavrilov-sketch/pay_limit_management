@@ -7,6 +7,8 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import ru.copperside.paylimits.management.common.invariant.LimitKindConflict;
+import ru.copperside.paylimits.management.common.invariant.LimitKindConflictException;
 import ru.copperside.paylimits.management.limitassignment.domain.LimitAssignmentProblemException;
 import ru.copperside.paylimits.management.limitrule.domain.LimitRuleProblemException;
 import ru.copperside.paylimits.management.limitrule.domain.RuleManifestProblemException;
@@ -14,6 +16,7 @@ import ru.copperside.paylimits.management.merchantgroup.domain.MerchantGroupProb
 import ru.copperside.paylimits.management.runtimeconfig.domain.RuntimeManifestProblemException;
 
 import java.time.Clock;
+import java.util.List;
 import java.util.UUID;
 
 @RestControllerAdvice
@@ -88,8 +91,16 @@ public class GlobalExceptionHandler {
         return problem(status, ex.code(), titleForRuntimeManifestProblem(ex.code()), messageWithoutCode(ex), ex.details());
     }
 
+    @ExceptionHandler(LimitKindConflictException.class)
+    ResponseEntity<ProblemEnvelope> handleLimitKindConflict(LimitKindConflictException ex) {
+        HttpStatus status = ex.compilation() ? HttpStatus.UNPROCESSABLE_ENTITY : HttpStatus.CONFLICT;
+        return problem(status, "LIMIT_KIND_CONFLICT",
+                "Merchant already receives a conflicting limit kind from another group",
+                ex.getMessage(), null, ex.conflicts());
+    }
+
     private ResponseEntity<ProblemEnvelope> problem(HttpStatus status, String code, String title, String message) {
-        return problem(status, code, title, message, null);
+        return problem(status, code, title, message, null, null);
     }
 
     private ResponseEntity<ProblemEnvelope> problem(
@@ -99,6 +110,17 @@ public class GlobalExceptionHandler {
             String message,
             Object details
     ) {
+        return problem(status, code, title, message, details, null);
+    }
+
+    private ResponseEntity<ProblemEnvelope> problem(
+            HttpStatus status,
+            String code,
+            String title,
+            String message,
+            Object details,
+            List<LimitKindConflict> conflicts
+    ) {
         ProblemDetail detail = new ProblemDetail(
                 TYPE_BASE + code.toLowerCase().replace('_', '-'),
                 title,
@@ -106,7 +128,8 @@ public class GlobalExceptionHandler {
                 code,
                 message,
                 details,
-                UUID.randomUUID().toString()
+                UUID.randomUUID().toString(),
+                conflicts
         );
         return ResponseEntity.status(status)
                 .contentType(MediaType.APPLICATION_PROBLEM_JSON)
