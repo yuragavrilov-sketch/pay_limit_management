@@ -36,7 +36,10 @@ class RuntimeManifestMetricsTest {
     void sizeGaugesReportZeroWhenNoManifestHasBeenCompiledYet() {
         SimpleMeterRegistry registry = new SimpleMeterRegistry();
         StubRepository repository = new StubRepository(Optional.empty(), Optional.empty());
-        new RuntimeManifestMetrics(provider(repository), fixedClock(MANIFEST_CREATED_AT), registry);
+        // Gauge.builder holds only a WEAK reference to the state object (RuntimeManifestMetrics), so
+        // it must stay reachable via a local variable through the assertions below, or the instance is
+        // GC-eligible immediately and the gauge could read back NaN.
+        RuntimeManifestMetrics metrics = new RuntimeManifestMetrics(provider(repository), fixedClock(MANIFEST_CREATED_AT), registry);
 
         assertThat(sizeGauge(registry, "rules")).isZero();
         assertThat(sizeGauge(registry, "assignments")).isZero();
@@ -50,7 +53,7 @@ class RuntimeManifestMetricsTest {
         SimpleMeterRegistry registry = new SimpleMeterRegistry();
         RuntimeManifestSizeSnapshot snapshot = new RuntimeManifestSizeSnapshot(3, 5, 7, MANIFEST_CREATED_AT);
         StubRepository repository = new StubRepository(Optional.of(snapshot), Optional.empty());
-        new RuntimeManifestMetrics(provider(repository), fixedClock(MANIFEST_CREATED_AT), registry);
+        RuntimeManifestMetrics metrics = new RuntimeManifestMetrics(provider(repository), fixedClock(MANIFEST_CREATED_AT), registry);
 
         assertThat(sizeGauge(registry, "rules")).isEqualTo(3.0);
         assertThat(sizeGauge(registry, "assignments")).isEqualTo(5.0);
@@ -65,7 +68,8 @@ class RuntimeManifestMetricsTest {
         // Latest config change happened BEFORE the manifest was compiled -> already published.
         StubRepository repository = new StubRepository(
                 Optional.of(snapshot), Optional.of(MANIFEST_CREATED_AT.minusSeconds(30)));
-        new RuntimeManifestMetrics(provider(repository), fixedClock(MANIFEST_CREATED_AT.plusSeconds(600)), registry);
+        RuntimeManifestMetrics metrics = new RuntimeManifestMetrics(
+                provider(repository), fixedClock(MANIFEST_CREATED_AT.plusSeconds(600)), registry);
 
         assertThat(ageGauge(registry)).isZero();
     }
@@ -77,7 +81,7 @@ class RuntimeManifestMetricsTest {
         Instant configChangedAt = MANIFEST_CREATED_AT.plusSeconds(120);
         Instant now = configChangedAt.plusSeconds(300);
         StubRepository repository = new StubRepository(Optional.of(snapshot), Optional.of(configChangedAt));
-        new RuntimeManifestMetrics(provider(repository), fixedClock(now), registry);
+        RuntimeManifestMetrics metrics = new RuntimeManifestMetrics(provider(repository), fixedClock(now), registry);
 
         assertThat(ageGauge(registry)).isEqualTo(300.0);
     }

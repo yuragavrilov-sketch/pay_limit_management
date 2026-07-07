@@ -352,6 +352,55 @@ class RuntimeManifestControllerTest {
         assertThat(compileTimerCount("rollback", "success")).isEqualTo(before + 1);
     }
 
+    // Review fix (Task 4 report): a compile-time limit-kind-invariant conflict (spec §3.4, MGT-I-09)
+    // records the compile timer's result=conflict tag and still surfaces as 422, unchanged.
+    @Test
+    void compilingWithSnapshotInvariantConflictRecordsCompileTimerWithConflictResult() throws Exception {
+        UUID groupA = UUID.randomUUID();
+        UUID groupB = UUID.randomUUID();
+        // Two active rules sharing the same LimitKind (metric/period/target/direction/operationTypes),
+        // each assigned to a DIFFERENT merchant group, with one merchant a member of both groups ->
+        // checkSnapshotInvariant re-derives a conflicting pair and aborts compilation with a 422.
+        LimitRule ruleA = repository.addActiveRule("RULE_CONFLICT_A");
+        LimitRule ruleB = repository.addActiveRule("RULE_CONFLICT_B");
+        repository.addGroupAssignment(ruleA.id(), ruleA.code(), groupA);
+        repository.addGroupAssignment(ruleB.id(), ruleB.code(), groupB);
+        repository.addMembership("502119", groupA);
+        repository.addMembership("502119", groupB);
+
+        double before = compileTimerCount("compile", "conflict");
+
+        mockMvc.perform(post("/internal/v1/limit-management/runtime-manifests")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                { "effectiveFrom": "2026-05-29T10:15:00Z" }
+                                """))
+                .andExpect(status().isUnprocessableEntity())
+                .andExpect(jsonPath("$.error.code").value("LIMIT_KIND_CONFLICT"));
+
+        assertThat(compileTimerCount("compile", "conflict")).isEqualTo(before + 1);
+    }
+
+    // Review fix (Task 4 report): a non-conflict compile failure (here, the lead-time violation
+    // already covered by mapsLeadTimeViolationToBadRequestProblem) records result=error on the
+    // compile timer, and the HTTP status stays exactly as before (400).
+    @Test
+    void compilingWithNonConflictFailureRecordsCompileTimerWithErrorResult() throws Exception {
+        double before = compileTimerCount("compile", "error");
+
+        mockMvc.perform(post("/internal/v1/limit-management/runtime-manifests")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "effectiveFrom": "2026-05-29T10:01:00Z"
+                                }
+                                """))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error.code").value("RUNTIME_MANIFEST_LEAD_TIME_VIOLATION"));
+
+        assertThat(compileTimerCount("compile", "error")).isEqualTo(before + 1);
+    }
+
     // Task 4 (M2): manifest-size and manifest-age gauges (spec §7) reflect live repository state.
     @Test
     void manifestSizeAndAgeGaugesReflectLatestCompiledManifest() throws Exception {
@@ -504,12 +553,34 @@ class RuntimeManifestControllerTest {
             return assignment;
         }
 
+        // Used to seed a limit-kind-invariant conflict at compile time (spec §3.4, MGT-I-09): a
+        // MERCHANT_GROUP assignment that checkSnapshotInvariant re-derives per merchant, alongside
+        // listMembershipsForCompilation memberships joining a merchant to that group.
+        RuntimeCompiledAssignment addGroupAssignment(UUID ruleId, String ruleCode, UUID groupId) {
+            RuntimeCompiledAssignment assignment = new RuntimeCompiledAssignment(
+                    UUID.randomUUID(),
+                    ruleId,
+                    ruleCode,
+                    AssignmentOwnerType.MERCHANT_GROUP,
+                    groupId.toString(),
+                    LimitMode.LIMITED,
+                    Instant.parse("2026-05-29T00:00:00Z"),
+                    null
+            );
+            assignments.add(assignment);
+            return assignment;
+        }
+
         RuntimeMerchantGroupMembership addMembership(String merchantId) {
+            return addMembership(merchantId, UUID.randomUUID());
+        }
+
+        RuntimeMerchantGroupMembership addMembership(String merchantId, UUID groupId) {
             RuntimeMerchantGroupMembership membership = new RuntimeMerchantGroupMembership(
                     UUID.randomUUID(),
                     merchantId,
                     UUID.randomUUID(),
-                    UUID.randomUUID(),
+                    groupId,
                     Instant.parse("2026-05-01T00:00:00Z"),
                     null
             );
