@@ -36,6 +36,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @SpringBootTest
 @AutoConfigureMockMvc
 @Testcontainers
+@org.springframework.context.annotation.Import(ru.copperside.paylimits.management.audit.OperatorHeaderTestConfig.class)
 class LimitKindInvariantIntegrationTest {
 
     @Container

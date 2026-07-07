@@ -36,7 +36,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
         + "org.springframework.boot.flyway.autoconfigure.FlywayAutoConfiguration")
 @AutoConfigureMockMvc
 @ActiveProfiles("local")
-@Import(MerchantGroupControllerTest.TestSupport.class)
+@Import({MerchantGroupControllerTest.TestSupport.class,
+        ru.copperside.paylimits.management.audit.OperatorHeaderTestConfig.class})
 class MerchantGroupControllerTest {
 
     @Autowired

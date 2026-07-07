@@ -7,6 +7,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import ru.copperside.paylimits.management.audit.domain.OperatorProblemException;
 import ru.copperside.paylimits.management.common.invariant.LimitKindConflict;
 import ru.copperside.paylimits.management.common.invariant.LimitKindConflictException;
 import ru.copperside.paylimits.management.limitassignment.domain.LimitAssignmentProblemException;
@@ -38,6 +39,11 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(ConstraintViolationException.class)
     ResponseEntity<ProblemEnvelope> handleConstraintValidation(ConstraintViolationException ex) {
         return problem(HttpStatus.BAD_REQUEST, "VALIDATION_ERROR", "Validation failed", ex.getMessage());
+    }
+
+    @ExceptionHandler(OperatorProblemException.class)
+    ResponseEntity<ProblemEnvelope> handleOperatorProblem(OperatorProblemException ex) {
+        return problem(HttpStatus.BAD_REQUEST, ex.code(), "Operator identity required", messageWithoutCode(ex));
     }
 
     @ExceptionHandler(MerchantGroupProblemException.class)

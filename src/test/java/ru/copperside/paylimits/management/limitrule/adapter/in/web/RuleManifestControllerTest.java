@@ -51,7 +51,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
         + "org.springframework.boot.flyway.autoconfigure.FlywayAutoConfiguration")
 @AutoConfigureMockMvc
 @ActiveProfiles("local")
-@Import(RuleManifestControllerTest.TestSupport.class)
+@Import({RuleManifestControllerTest.TestSupport.class,
+        ru.copperside.paylimits.management.audit.OperatorHeaderTestConfig.class})
 class RuleManifestControllerTest {
 
     private static final Instant NOW = Instant.parse("2026-05-28T09:00:00Z");

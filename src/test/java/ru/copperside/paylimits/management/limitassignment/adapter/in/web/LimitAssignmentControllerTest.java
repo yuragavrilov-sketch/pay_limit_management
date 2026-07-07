@@ -39,7 +39,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
         + "org.springframework.boot.flyway.autoconfigure.FlywayAutoConfiguration")
 @AutoConfigureMockMvc
 @ActiveProfiles("local")
-@Import(LimitAssignmentControllerTest.TestSupport.class)
+@Import({LimitAssignmentControllerTest.TestSupport.class,
+        ru.copperside.paylimits.management.audit.OperatorHeaderTestConfig.class})
 class LimitAssignmentControllerTest {
 
     private static final UUID RULE_ID = UUID.fromString("0db59f6a-7f8c-45d6-b6a7-cc1fcb397c6e");

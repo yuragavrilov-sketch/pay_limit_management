@@ -65,7 +65,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 })
 @AutoConfigureMockMvc
 @ActiveProfiles("local")
-@Import(RuntimeManifestControllerTest.TestSupport.class)
+@Import({RuntimeManifestControllerTest.TestSupport.class,
+        ru.copperside.paylimits.management.audit.OperatorHeaderTestConfig.class})
 class RuntimeManifestControllerTest {
 
     @Autowired
