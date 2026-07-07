@@ -32,6 +32,7 @@ import ru.copperside.paylimits.management.runtimeconfig.domain.RuntimeManifest;
 import ru.copperside.paylimits.management.runtimeconfig.domain.RuntimeManifestDescriptor;
 import ru.copperside.paylimits.management.runtimeconfig.domain.RuntimeManifestPayload;
 import ru.copperside.paylimits.management.runtimeconfig.domain.RuntimeManifestProblemException;
+import ru.copperside.paylimits.management.runtimeconfig.domain.RuntimeManifestSizeSnapshot;
 import ru.copperside.paylimits.management.runtimeconfig.domain.RuntimeManifestStatus;
 import ru.copperside.paylimits.management.runtimeconfig.domain.RuntimeMerchantGroupMembership;
 import ru.copperside.paylimits.management.runtimeconfig.domain.RuntimeOperationType;
@@ -237,6 +238,38 @@ public class PostgresRuntimeManifestRepository implements RuntimeManifestReposit
                 order by version desc
                 limit ?
                 """, (rs, rowNum) -> mapDescriptor(rs), Math.max(1, limit));
+    }
+
+    @Override
+    public Optional<RuntimeManifestSizeSnapshot> findLatestManifestSize() {
+        return jdbcTemplate.query("""
+                select rule_count, assignment_count, membership_count, created_at
+                from limit_management.runtime_manifests
+                order by version desc
+                limit 1
+                """, (rs, rowNum) -> new RuntimeManifestSizeSnapshot(
+                        rs.getInt("rule_count"),
+                        rs.getInt("assignment_count"),
+                        rs.getInt("membership_count"),
+                        rs.getTimestamp("created_at").toInstant()
+                )).stream().findFirst();
+    }
+
+    @Override
+    public Optional<Instant> findLatestConfigChangeAt() {
+        // memberships have no updated_at column (append/close semantics) — the latest touch is either
+        // creation or the close, whichever is later; rules/assignments both carry a plain updated_at.
+        Timestamp latest = jdbcTemplate.queryForObject("""
+                select max(changed_at) from (
+                    select max(updated_at) as changed_at from limit_management.limit_rules
+                    union all
+                    select max(updated_at) from limit_management.limit_assignments
+                    union all
+                    select max(greatest(created_at, coalesce(closed_at, created_at)))
+                    from limit_management.merchant_group_memberships
+                ) changes
+                """, Timestamp.class);
+        return Optional.ofNullable(latest).map(Timestamp::toInstant);
     }
 
     private void validateManifest(RuntimeManifest manifest) {

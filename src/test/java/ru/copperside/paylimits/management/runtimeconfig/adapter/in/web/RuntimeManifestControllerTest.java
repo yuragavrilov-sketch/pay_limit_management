@@ -1,5 +1,6 @@
 package ru.copperside.paylimits.management.runtimeconfig.adapter.in.web;
 
+import io.micrometer.core.instrument.MeterRegistry;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -78,6 +79,9 @@ class RuntimeManifestControllerTest {
 
     @Autowired
     private ru.copperside.paylimits.management.audit.AuditTestSupport.RecordingAuditEventRepository auditRepository;
+
+    @Autowired
+    private MeterRegistry meterRegistry;
 
     @BeforeEach
     void setUp() {
@@ -315,6 +319,102 @@ class RuntimeManifestControllerTest {
         org.assertj.core.api.Assertions.assertThat(auditRepository.events()).isEmpty();
     }
 
+    // Task 4 (M2): compiling successfully records a pay_limit_management.manifest.compile timer
+    // sample tagged operation=compile,result=success (spec §7).
+    @Test
+    void compilingRecordsCompileTimerWithSuccessResult() throws Exception {
+        double before = compileTimerCount("compile", "success");
+
+        mockMvc.perform(post("/internal/v1/limit-management/runtime-manifests")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                { "effectiveFrom": "2026-05-29T10:15:00Z" }
+                                """))
+                .andExpect(status().isOk());
+
+        assertThat(compileTimerCount("compile", "success")).isEqualTo(before + 1);
+    }
+
+    // Task 4 (M2): rollback shares the same timer, tagged operation=rollback.
+    @Test
+    void rollingBackRecordsCompileTimerWithRollbackOperationTag() throws Exception {
+        RuntimeManifest source = repository.saveCompiledManifest(version -> repository.sampleManifest(
+                version, Instant.parse("2026-05-29T10:15:00Z")));
+        double before = compileTimerCount("rollback", "success");
+
+        mockMvc.perform(post("/internal/v1/limit-management/runtime-manifests/{manifestId}/rollback", source.id())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                { "effectiveFrom": "2026-05-29T10:30:00Z" }
+                                """))
+                .andExpect(status().isOk());
+
+        assertThat(compileTimerCount("rollback", "success")).isEqualTo(before + 1);
+    }
+
+    // Task 4 (M2): manifest-size and manifest-age gauges (spec §7) reflect live repository state.
+    @Test
+    void manifestSizeAndAgeGaugesReflectLatestCompiledManifest() throws Exception {
+        mockMvc.perform(post("/internal/v1/limit-management/runtime-manifests")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                { "effectiveFrom": "2026-05-29T10:15:00Z" }
+                                """))
+                .andExpect(status().isOk());
+
+        assertThat(sizeGaugeValue("rules")).isEqualTo(1.0);
+        assertThat(sizeGaugeValue("assignments")).isEqualTo(1.0);
+        assertThat(sizeGaugeValue("memberships")).isEqualTo(1.0);
+        assertThat(sizeGaugeValue("total")).isEqualTo(3.0);
+        // Steady state right after compile: no config change postdates the manifest yet -> age is 0.
+        // (The clock is fixed for this whole test class, so a positive-age scenario needs independent
+        // control over "manifest created at" vs. "now" — covered by the Spring-free
+        // RuntimeManifestMetricsTest, which drives that with its own Clock.)
+        assertThat(ageGaugeValue()).isZero();
+    }
+
+    // Task 4 (M2): the new meters are visible via /actuator/metrics (existing ActuatorIntegrationTest
+    // covers the endpoint itself; this asserts our specific meter names are registered).
+    @Test
+    void actuatorMetricsListsManifestMeterNames() throws Exception {
+        mockMvc.perform(post("/internal/v1/limit-management/runtime-manifests")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                { "effectiveFrom": "2026-05-29T10:15:00Z" }
+                                """))
+                .andExpect(status().isOk());
+
+        mockMvc.perform(get("/actuator/metrics"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.names")
+                        .value(org.hamcrest.Matchers.hasItem("pay_limit_management.manifest.compile")))
+                .andExpect(jsonPath("$.names")
+                        .value(org.hamcrest.Matchers.hasItem("pay_limit_management.manifest.size")))
+                .andExpect(jsonPath("$.names")
+                        .value(org.hamcrest.Matchers.hasItem("pay_limit_management.manifest.unpublished_change_age_seconds")));
+    }
+
+    private double compileTimerCount(String operation, String result) {
+        io.micrometer.core.instrument.Timer timer = meterRegistry.find("pay_limit_management.manifest.compile")
+                .tag("operation", operation)
+                .tag("result", result)
+                .timer();
+        return timer == null ? 0.0 : timer.count();
+    }
+
+    private double sizeGaugeValue(String component) {
+        return meterRegistry.get("pay_limit_management.manifest.size")
+                .tag("component", component)
+                .gauge()
+                .value();
+    }
+
+    private double ageGaugeValue() {
+        return meterRegistry.get("pay_limit_management.manifest.unpublished_change_age_seconds")
+                .gauge()
+                .value();
+    }
+
     @TestConfiguration(proxyBeanMethods = false)
     static class TestSupport {
 
@@ -355,12 +455,14 @@ class RuntimeManifestControllerTest {
         final List<RuntimeCompiledAssignment> assignments = new ArrayList<>();
         final List<RuntimeMerchantGroupMembership> memberships = new ArrayList<>();
         final List<RuntimeManifest> manifests = new ArrayList<>();
+        Instant latestConfigChangeAt;
 
         FakeRepository clear() {
             rules.clear();
             assignments.clear();
             memberships.clear();
             manifests.clear();
+            latestConfigChangeAt = null;
             return this;
         }
 
@@ -527,6 +629,19 @@ class RuntimeManifestControllerTest {
                             null
                     ))
                     .toList();
+        }
+
+        @Override
+        public java.util.Optional<ru.copperside.paylimits.management.runtimeconfig.domain.RuntimeManifestSizeSnapshot> findLatestManifestSize() {
+            return manifests.stream()
+                    .max(Comparator.comparingInt(RuntimeManifest::version))
+                    .map(manifest -> new ru.copperside.paylimits.management.runtimeconfig.domain.RuntimeManifestSizeSnapshot(
+                            manifest.ruleCount(), manifest.assignmentCount(), manifest.membershipCount(), manifest.createdAt()));
+        }
+
+        @Override
+        public java.util.Optional<Instant> findLatestConfigChangeAt() {
+            return java.util.Optional.ofNullable(latestConfigChangeAt);
         }
     }
 }

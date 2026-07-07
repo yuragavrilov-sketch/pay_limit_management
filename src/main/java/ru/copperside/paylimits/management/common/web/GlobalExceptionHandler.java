@@ -1,5 +1,6 @@
 package ru.copperside.paylimits.management.common.web;
 
+import io.micrometer.core.instrument.MeterRegistry;
 import jakarta.validation.ConstraintViolationException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
@@ -25,10 +26,22 @@ public class GlobalExceptionHandler {
 
     private static final String TYPE_BASE = "https://contracts.newpay/errors/";
 
-    private final Clock clock;
+    /**
+     * Counter: limit-kind/assignment invariant conflicts (spec §7), tagged {@code code}
+     * ({@code LIMIT_KIND_CONFLICT}/{@code ASSIGNMENT_CONFLICT}) and {@code status} ({@code 409}/
+     * {@code 422}) so the three interactive checkpoints, the compile-time 422, and assignment
+     * overlaps are all distinguishable in one metric.
+     */
+    static final String CONFLICT_COUNTER_METRIC = "pay_limit_management.manifest.conflicts";
 
-    public GlobalExceptionHandler(Clock clock) {
+    private static final String ASSIGNMENT_CONFLICT_CODE = "ASSIGNMENT_CONFLICT";
+
+    private final Clock clock;
+    private final MeterRegistry meterRegistry;
+
+    public GlobalExceptionHandler(Clock clock, MeterRegistry meterRegistry) {
         this.clock = clock;
+        this.meterRegistry = meterRegistry;
     }
 
     @ExceptionHandler(MethodArgumentNotValidException.class)
@@ -74,6 +87,9 @@ public class GlobalExceptionHandler {
             case "VALIDATION_ERROR" -> HttpStatus.BAD_REQUEST;
             default -> HttpStatus.CONFLICT;
         };
+        if (ASSIGNMENT_CONFLICT_CODE.equals(ex.code())) {
+            incrementConflictCounter(ASSIGNMENT_CONFLICT_CODE, status);
+        }
         return problem(status, ex.code(), titleForAssignmentProblem(ex.code()), messageWithoutCode(ex), ex.details());
     }
 
@@ -100,9 +116,15 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(LimitKindConflictException.class)
     ResponseEntity<ProblemEnvelope> handleLimitKindConflict(LimitKindConflictException ex) {
         HttpStatus status = ex.compilation() ? HttpStatus.UNPROCESSABLE_ENTITY : HttpStatus.CONFLICT;
+        incrementConflictCounter("LIMIT_KIND_CONFLICT", status);
         return problem(status, "LIMIT_KIND_CONFLICT",
                 "Merchant already receives a conflicting limit kind from another group",
                 ex.getMessage(), null, ex.conflicts());
+    }
+
+    private void incrementConflictCounter(String code, HttpStatus status) {
+        meterRegistry.counter(CONFLICT_COUNTER_METRIC, "code", code, "status", String.valueOf(status.value()))
+                .increment();
     }
 
     private ResponseEntity<ProblemEnvelope> problem(HttpStatus status, String code, String title, String message) {
