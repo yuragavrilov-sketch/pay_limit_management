@@ -156,7 +156,11 @@ public class MerchantGroupService {
                     .filter(existingGroupId -> !existingGroupId.equals(group.id()))
                     .map(List::of)
                     .orElseGet(List::of);
-            invariantChecker.checkMembershipUnderLock(merchantId, group.id(), replacedGroups, now);
+            // The invariant is temporal: two group-limit-kinds conflict only if they are in effect at
+            // the same time. Check "at" the new membership's validFrom (spec §8 MGT-I-19), not "now" --
+            // otherwise a future-dated, non-overlapping change against a not-yet-closed predecessor
+            // membership in a DIFFERENT group produces a false 409.
+            invariantChecker.checkMembershipUnderLock(merchantId, group.id(), replacedGroups, validFrom);
             return overlapping
                     .map(existing -> replaceExistingMembership(existing, validFrom, now, actor, membership))
                     .orElseGet(() -> repository.saveMembership(membership));

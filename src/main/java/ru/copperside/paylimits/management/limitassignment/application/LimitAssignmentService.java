@@ -70,7 +70,11 @@ public class LimitAssignmentService {
         // assignments; GLOBAL/MERCHANT assignments skip it.
         return transactionRunner.run(() -> {
             if (ownerType == AssignmentOwnerType.MERCHANT_GROUP) {
-                invariantChecker.checkGroupAssignment(ruleId, UUID.fromString(ownerId), now);
+                // The invariant is temporal: check "at" the new assignment's validFrom (spec §8
+                // MGT-I-19), not "now" -- otherwise a future-dated assignment can be falsely rejected
+                // against a group membership that will have ended by the time the assignment takes
+                // effect.
+                invariantChecker.checkGroupAssignment(ruleId, UUID.fromString(ownerId), validFrom);
             }
             rejectOverlap(null, ruleId, ownerType, ownerId, validFrom, validTo, true);
             return repository.saveAssignment(assignment);

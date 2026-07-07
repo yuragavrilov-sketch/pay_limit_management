@@ -19,6 +19,7 @@ import ru.copperside.paylimits.management.limitrule.domain.RulePeriod;
 
 import java.math.BigDecimal;
 import java.sql.Timestamp;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.Set;
 import java.util.UUID;
@@ -239,6 +240,78 @@ class LimitKindInvariantIntegrationTest {
                 .andExpect(jsonPath("$.error.conflicts[0].merchantId").value(merchantId))
                 .andExpect(jsonPath("$.error.conflicts[0].existingGroupId").value(groupG2.toString()))
                 .andExpect(jsonPath("$.error.conflicts[0].requestedGroupId").value(groupH.toString()));
+    }
+
+    // ---- MGT-I-19 (temporal): the conflict must be evaluated AT THE NEW MEMBERSHIP'S validFrom, not
+    // "now". Merchant leaves G1 (DIFFERENT type from the target group, so the same-type replace path
+    // above does not apply) with validTo=T set in the future, and joins G2 -- which delivers the SAME
+    // kind -- with validFrom=T. The two periods are adjacent, not overlapping: at T, G1 has already
+    // ended. Checking at "now" (before T) would wrongly see G1 as still current and 409. ----
+
+    @Test
+    void movingMerchantToADifferentTypeGroupAtTheClosingInstantOfTheOldMembershipIsAllowed() throws Exception {
+        String merchantId = "990020";
+        UUID typeA = insertGroupType();
+        UUID typeB = insertGroupType();
+        UUID groupG1 = insertGroup(typeA); // current membership, closes at T
+        UUID groupG2 = insertGroup(typeB); // DIFFERENT type -- not excluded via the same-type replace path
+
+        UUID ruleG1 = insertRule("MGT_I_19T_G1", RuleMetric.COUNT, RulePeriod.DAY, LimitTargetType.PHONE,
+                OperationDirection.IN, "ACTIVE", Set.of("SBP_C2B"));
+        insertAssignment(ruleG1, "MERCHANT_GROUP", groupG1.toString(), true);
+        UUID ruleG2 = insertRule("MGT_I_19T_G2", RuleMetric.COUNT, RulePeriod.DAY, LimitTargetType.PHONE,
+                OperationDirection.IN, "ACTIVE", Set.of("SBP_C2B"));
+        insertAssignment(ruleG2, "MERCHANT_GROUP", groupG2.toString(), true);
+
+        Instant transferInstant = Instant.now().plus(Duration.ofDays(30));
+        insertMembership(merchantId, groupG1, typeA, PAST, transferInstant);
+
+        mockMvc.perform(post("/internal/v1/limit-management/merchant-group-memberships")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                { "merchantId": "%s", "groupId": "%s", "validFrom": "%s" }
+                                """.formatted(merchantId, groupG2, transferInstant)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.merchantId").value(merchantId))
+                .andExpect(jsonPath("$.data.groupId").value(groupG2.toString()))
+                .andExpect(jsonPath("$.error").doesNotExist());
+    }
+
+    // ---- Still rejects a real overlap (assignment checkpoint) even with a future validFrom: the
+    // merchant remains a member of an open-ended, conflicting-kind group at that future instant, so
+    // checking "at validFrom" instead of "now" must not weaken detection. ----
+
+    @Test
+    void assigningAConflictingKindWithAFutureValidFromIsStillRejected() throws Exception {
+        String merchantId = "990021";
+        UUID typeA = insertGroupType();
+        UUID typeB = insertGroupType();
+        UUID groupG = insertGroup(typeA); // assignment target
+        UUID groupH = insertGroup(typeB); // already delivering the kind, open-ended membership
+
+        insertMembership(merchantId, groupG, typeA, PAST, null);
+        insertMembership(merchantId, groupH, typeB, PAST, null);
+
+        UUID ruleH = insertRule("MGT_I_19T_H", RuleMetric.COUNT, RulePeriod.DAY, LimitTargetType.PHONE,
+                OperationDirection.IN, "ACTIVE", Set.of("SBP_C2B"));
+        insertAssignment(ruleH, "MERCHANT_GROUP", groupH.toString(), true);
+
+        UUID ruleG = insertRule("MGT_I_19T_G", RuleMetric.COUNT, RulePeriod.DAY, LimitTargetType.PHONE,
+                OperationDirection.IN, "ACTIVE", Set.of("SBP_C2B"));
+
+        String futureValidFrom = Instant.now().plus(Duration.ofDays(90)).toString();
+
+        mockMvc.perform(post("/internal/v1/limit-management/assignments")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                { "ruleId": "%s", "ownerType": "MERCHANT_GROUP", "ownerId": "%s",
+                                  "limitMode": "UNLIMITED", "validFrom": "%s" }
+                                """.formatted(ruleG, groupG, futureValidFrom)))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.error.code").value("LIMIT_KIND_CONFLICT"))
+                .andExpect(jsonPath("$.error.conflicts[0].merchantId").value(merchantId))
+                .andExpect(jsonPath("$.error.conflicts[0].existingGroupId").value(groupH.toString()))
+                .andExpect(jsonPath("$.error.conflicts[0].requestedGroupId").value(groupG.toString()));
     }
 
     // ---- seed helpers (mirror PostgresLimitKindInvariantRepositoryIntegrationTest) ----
