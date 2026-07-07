@@ -13,6 +13,8 @@ import ru.copperside.paylimits.management.limitrule.domain.RulePeriod;
 import java.sql.Array;
 import java.sql.ResultSet;
 import java.sql.SQLException;
+import java.sql.Timestamp;
+import java.time.Instant;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Optional;
@@ -54,16 +56,16 @@ public class PostgresLimitKindInvariantRepository implements LimitKindInvariantR
     }
 
     @Override
-    public List<String> membersOfGroup(UUID groupId) {
+    public List<String> membersOfGroup(UUID groupId, Instant at) {
         return jdbcTemplate.queryForList("""
                 select distinct merchant_id
                 from limit_management.merchant_group_memberships
-                where group_id = ? and (valid_to is null or valid_to > now())
-                """, String.class, groupId);
+                where group_id = ? and (valid_to is null or valid_to > ?)
+                """, String.class, groupId, Timestamp.from(at));
     }
 
     @Override
-    public List<MerchantGroupKind> kindsReceivedByMerchantExcludingGroup(String merchantId, UUID excludedGroupId) {
+    public List<MerchantGroupKind> kindsReceivedByMerchantExcludingGroup(String merchantId, UUID excludedGroupId, Instant at) {
         return jdbcTemplate.query("""
                 select m.group_id as membership_group_id, r.metric, r.period, r.target_type, r.direction,
                        array_agg(ot.operation_type_code) as operation_types
@@ -73,12 +75,12 @@ public class PostgresLimitKindInvariantRepository implements LimitKindInvariantR
                 join limit_management.limit_rules r on r.id = a.rule_id and r.status = 'ACTIVE'
                 join limit_management.limit_rule_operation_type ot on ot.rule_id = r.id
                 where m.merchant_id = ?
-                  and (m.valid_to is null or m.valid_to > now())
+                  and (m.valid_to is null or m.valid_to > ?)
                   and m.group_id <> ?
                 group by m.group_id, r.id, r.metric, r.period, r.target_type, r.direction
                 """,
                 (rs, rowNum) -> new MerchantGroupKind(rs.getObject("membership_group_id", UUID.class), mapKind(rs)),
-                merchantId, excludedGroupId);
+                merchantId, Timestamp.from(at), excludedGroupId);
     }
 
     @Override

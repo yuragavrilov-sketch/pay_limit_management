@@ -2,6 +2,7 @@ package ru.copperside.paylimits.management.common.invariant.port;
 
 import ru.copperside.paylimits.management.limitrule.domain.LimitKind;
 
+import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -35,16 +36,17 @@ public interface LimitKindInvariantRepository {
     List<LimitKind> kindsDeliveredByGroup(UUID groupId);
 
     /**
-     * The merchant ids that are current-or-future members of a group ({@code valid_to is null
-     * or valid_to > now()}), distinct.
+     * The merchant ids that are current-or-future members of a group as of {@code at}
+     * ({@code valid_to is null or valid_to > at}), distinct.
      */
-    List<String> membersOfGroup(UUID groupId);
+    List<String> membersOfGroup(UUID groupId, Instant at);
 
     /**
      * For every group (other than {@code excludedGroupId}) the merchant is a current-or-future
-     * member of, the {@link LimitKind}s that group delivers, each tagged with its group id.
+     * member of as of {@code at}, the {@link LimitKind}s that group delivers, each tagged with
+     * its group id.
      */
-    List<MerchantGroupKind> kindsReceivedByMerchantExcludingGroup(String merchantId, UUID excludedGroupId);
+    List<MerchantGroupKind> kindsReceivedByMerchantExcludingGroup(String merchantId, UUID excludedGroupId, Instant at);
 
     /**
      * The groups that have an enabled {@code MERCHANT_GROUP} assignment of the given rule.

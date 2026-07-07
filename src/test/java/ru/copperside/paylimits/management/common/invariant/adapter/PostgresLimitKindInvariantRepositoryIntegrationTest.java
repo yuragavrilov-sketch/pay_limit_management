@@ -98,7 +98,11 @@ class PostgresLimitKindInvariantRepositoryIntegrationTest {
         // Duplicate (closed, adjacent) membership for 502111 under a different id must not duplicate the result.
         insertMembership("502111", groupId, typeId, NOW.minusSeconds(2 * 86400), NOW.minusSeconds(86400));
 
-        assertThat(repository.membersOfGroup(groupId)).containsExactlyInAnyOrder("502111", "502112");
+        assertThat(repository.membersOfGroup(groupId, NOW)).containsExactlyInAnyOrder("502111", "502112");
+
+        // The cutoff is the passed instant, not the database wall clock: querying at an earlier
+        // instant (before 502113's valid_to) must include the membership that NOW excludes.
+        assertThat(repository.membersOfGroup(groupId, NOW.minusSeconds(7 * 86400))).contains("502113");
     }
 
     @Test
@@ -130,7 +134,7 @@ class PostgresLimitKindInvariantRepositoryIntegrationTest {
         insertMembership(merchantId, includedGroup, includedType, NOW.minusSeconds(86400), null);
         insertMembership(merchantId, futureGroup, futureType, NOW.plusSeconds(86400), null); // future membership still counts
 
-        List<MerchantGroupKind> received = repository.kindsReceivedByMerchantExcludingGroup(merchantId, excludedGroup);
+        List<MerchantGroupKind> received = repository.kindsReceivedByMerchantExcludingGroup(merchantId, excludedGroup, NOW);
 
         assertThat(received).containsExactlyInAnyOrder(
                 new MerchantGroupKind(includedGroup,
