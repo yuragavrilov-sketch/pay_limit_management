@@ -270,6 +270,105 @@ class LimitRuleServiceTest {
     }
 
     @Test
+    void patchToIntervalShapeClearsLimitValueWithoutResendingIt() {
+        OperationType type = repository.addOperationType("SBP_C2B", OperationDirection.IN, true);
+        LimitRule draft = service.createRule(new CreateLimitRuleCommand(
+                "RULE_SBP_TARGET_DAY",
+                "SBP target daily amount",
+                Set.of(type.code()),
+                OperationDirection.IN,
+                new Measure(RuleMetric.AMOUNT, RulePeriod.DAY, AggregationScope.TARGET, "RUB", null),
+                LimitTargetType.PHONE,
+                new BigDecimal("1000.00"),
+                "template",
+                noneSelector()
+        ));
+        assertThat(draft.limitValue()).isEqualByComparingTo("1000.00");
+
+        // Shape transition to INTERVAL: limitValue is not resent (must be cleared, not inherited).
+        LimitRule patched = service.patchRule(draft.id(), new PatchLimitRuleCommand(
+                null,
+                null,
+                null,
+                new Measure(RuleMetric.INTERVAL, null, AggregationScope.TARGET, null, 5),
+                null,
+                null,
+                null,
+                null
+        ));
+
+        assertThat(patched.measure().metric()).isEqualTo(RuleMetric.INTERVAL);
+        assertThat(patched.limitValue()).isNull();
+        assertThat(patched.limitTargetType()).isEqualTo(LimitTargetType.PHONE);
+    }
+
+    @Test
+    void patchToOwnerScopeClearsLimitTargetTypeWithoutResendingIt() {
+        OperationType type = repository.addOperationType("SBP_C2B", OperationDirection.IN, true);
+        LimitRule draft = service.createRule(new CreateLimitRuleCommand(
+                "RULE_SBP_TARGET_DAY",
+                "SBP target daily amount",
+                Set.of(type.code()),
+                OperationDirection.IN,
+                new Measure(RuleMetric.AMOUNT, RulePeriod.DAY, AggregationScope.TARGET, "RUB", null),
+                LimitTargetType.PHONE,
+                new BigDecimal("1000.00"),
+                "template",
+                noneSelector()
+        ));
+        assertThat(draft.limitTargetType()).isEqualTo(LimitTargetType.PHONE);
+
+        // Shape transition to OWNER scope: limitTargetType is not resent (must be cleared, not inherited).
+        LimitRule patched = service.patchRule(draft.id(), new PatchLimitRuleCommand(
+                null,
+                null,
+                null,
+                new Measure(RuleMetric.AMOUNT, RulePeriod.DAY, AggregationScope.OWNER, "RUB", null),
+                null,
+                null,
+                null,
+                null
+        ));
+
+        assertThat(patched.measure().aggregationScope()).isEqualTo(AggregationScope.OWNER);
+        assertThat(patched.limitTargetType()).isNull();
+        assertThat(patched.limitValue()).isEqualByComparingTo("1000.00");
+    }
+
+    @Test
+    void noOpShapePatchPreservesLimitValueAndLimitTargetType() {
+        OperationType type = repository.addOperationType("SBP_C2B", OperationDirection.IN, true);
+        LimitRule draft = service.createRule(new CreateLimitRuleCommand(
+                "RULE_SBP_TARGET_DAY",
+                "SBP target daily amount",
+                Set.of(type.code()),
+                OperationDirection.IN,
+                new Measure(RuleMetric.AMOUNT, RulePeriod.DAY, AggregationScope.TARGET, "RUB", null),
+                LimitTargetType.PHONE,
+                new BigDecimal("1000.00"),
+                "template",
+                noneSelector()
+        ));
+
+        // Only the name changes; measure/limitTargetType/limitValue are not resent and must survive.
+        LimitRule patched = service.patchRule(draft.id(), new PatchLimitRuleCommand(
+                "Renamed",
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null
+        ));
+
+        assertThat(patched.name()).isEqualTo("Renamed");
+        assertThat(patched.measure()).isEqualTo(draft.measure());
+        assertThat(patched.limitTargetType()).isEqualTo(LimitTargetType.PHONE);
+        assertThat(patched.limitValue()).isEqualByComparingTo("1000.00");
+    }
+
+    @Test
     void activatesDraftAndMakesItImmutable() {
         repository.addOperationType("SBP_C2B", OperationDirection.IN, true);
         LimitRule draft = service.createRule(amountRule(

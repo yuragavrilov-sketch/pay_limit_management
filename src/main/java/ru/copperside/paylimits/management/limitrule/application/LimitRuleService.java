@@ -165,9 +165,16 @@ public class LimitRuleService {
                 ? existing.operationTypes() : command.operationTypes();
         OperationDirection direction = command.direction() == null ? existing.direction() : command.direction();
         Measure measure = command.measure() == null ? existing.measure() : command.measure();
-        LimitTargetType targetType = command.limitTargetType() == null
-                ? existing.limitTargetType() : command.limitTargetType();
-        BigDecimal limitValue = command.limitValue() == null ? existing.limitValue() : command.limitValue();
+        // Derive limitTargetType/limitValue from the EFFECTIVE (merged) measure shape, not blind
+        // null-means-keep inheritance: a shape transition (e.g. AMOUNT/DAY/TARGET -> INTERVAL, or
+        // TARGET -> OWNER) must clear the now-inapplicable field even when the PATCH body doesn't
+        // resend it, otherwise validateRuleDefinition rejects the merged rule as inconsistent.
+        LimitTargetType targetType = measure.aggregationScope() == AggregationScope.TARGET
+                ? (command.limitTargetType() != null ? command.limitTargetType() : existing.limitTargetType())
+                : null;
+        BigDecimal limitValue = measure.metric() == RuleMetric.INTERVAL
+                ? null
+                : (command.limitValue() != null ? command.limitValue() : existing.limitValue());
         String template = command.errorMessageTemplate() == null
                 ? existing.errorMessageTemplate() : command.errorMessageTemplate();
         RuleSelector<AttributeSelectorType> attributeSelector = command.attributeSelector() == null

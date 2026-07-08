@@ -24,17 +24,18 @@ class MerchantGroupServiceTest {
     private static final Clock CLOCK = Clock.fixed(Instant.parse("2026-05-27T09:00:00Z"), ZoneOffset.UTC);
 
     private FakeRepository repository;
+    private ru.copperside.paylimits.management.audit.AuditTestSupport.RecordingAuditEventRepository auditEventRepository;
     private MerchantGroupService service;
 
     @BeforeEach
     void setUp() {
         repository = new FakeRepository();
+        auditEventRepository = new ru.copperside.paylimits.management.audit.AuditTestSupport.RecordingAuditEventRepository();
         service = new MerchantGroupService(
                 repository,
                 ru.copperside.paylimits.management.common.invariant.InvariantTestSupport.noOpChecker(),
                 new ru.copperside.paylimits.management.common.invariant.InvariantTestSupport.PassThroughTransactionRunner(),
-                ru.copperside.paylimits.management.audit.AuditTestSupport.recorder(
-                        new ru.copperside.paylimits.management.audit.AuditTestSupport.RecordingAuditEventRepository(), CLOCK),
+                ru.copperside.paylimits.management.audit.AuditTestSupport.recorder(auditEventRepository, CLOCK),
                 CLOCK);
     }
 
@@ -108,6 +109,62 @@ class MerchantGroupServiceTest {
         assertThat(repository.closedMembershipId).isEqualTo(previous.id());
         assertThat(repository.closedValidTo).isEqualTo(Instant.parse("2026-05-27T10:00:00Z"));
         assertThat(repository.replacedMembershipId).isEqualTo(previous.id());
+    }
+
+    @Test
+    void tierMoveAuditsBothTheClosedPredecessorAndTheNewMembership() {
+        MerchantGroupType type = repository.addType("risk-tier", true);
+        MerchantGroup low = repository.addGroup(type.id(), "risk-low", true);
+        MerchantGroup high = repository.addGroup(type.id(), "risk-high", true);
+        MerchantGroupMembership previous = repository.addMembership(
+                "502118",
+                low.id(),
+                type.id(),
+                Instant.parse("2026-05-26T09:00:00Z"),
+                null
+        );
+
+        MerchantGroupMembership next = service.assignMembership(new AssignMembershipCommand(
+                "502118",
+                high.id(),
+                Instant.parse("2026-05-27T10:00:00Z"),
+                "alice"
+        ));
+
+        List<ru.copperside.paylimits.management.audit.domain.AuditEvent> events = auditEventRepository.events();
+        assertThat(events).hasSize(2);
+        assertThat(events)
+                .filteredOn(event -> event.action().equals("CLOSE_MEMBERSHIP"))
+                .singleElement()
+                .satisfies(event -> {
+                    assertThat(event.entityType()).isEqualTo("MERCHANT_GROUP_MEMBERSHIP");
+                    assertThat(event.entityId()).isEqualTo(previous.id().toString());
+                });
+        assertThat(events)
+                .filteredOn(event -> event.action().equals("ASSIGN_MEMBERSHIP"))
+                .singleElement()
+                .satisfies(event -> {
+                    assertThat(event.entityType()).isEqualTo("MERCHANT_GROUP_MEMBERSHIP");
+                    assertThat(event.entityId()).isEqualTo(next.id().toString());
+                });
+    }
+
+    @Test
+    void plainNewMembershipWithoutPredecessorAuditsOnlyAssignMembership() {
+        MerchantGroupType type = repository.addType("risk-tier", true);
+        MerchantGroup group = repository.addGroup(type.id(), "risk-high", true);
+
+        MerchantGroupMembership next = service.assignMembership(new AssignMembershipCommand(
+                "502118",
+                group.id(),
+                Instant.parse("2026-05-27T10:00:00Z"),
+                "alice"
+        ));
+
+        List<ru.copperside.paylimits.management.audit.domain.AuditEvent> events = auditEventRepository.events();
+        assertThat(events).hasSize(1);
+        assertThat(events.get(0).action()).isEqualTo("ASSIGN_MEMBERSHIP");
+        assertThat(events.get(0).entityId()).isEqualTo(next.id().toString());
     }
 
     @Test

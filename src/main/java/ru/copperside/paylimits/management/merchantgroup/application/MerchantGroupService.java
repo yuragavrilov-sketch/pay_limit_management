@@ -190,6 +190,17 @@ public class MerchantGroupService {
             MerchantGroupMembership saved = overlapping
                     .map(existing -> replaceExistingMembership(existing, validFrom, now, actor, membership))
                     .orElseGet(() -> repository.saveMembership(membership));
+            // A tier move (predecessor's group differs from the requested one) closes the predecessor
+            // row as a side effect of replaceExistingMembership -- that closure is a real mutation and
+            // must be audited the same way an explicit closeMembership() call would be, in the same
+            // transaction as the ASSIGN_MEMBERSHIP event for the new row.
+            overlapping
+                    .filter(existing -> !existing.groupId().equals(group.id()))
+                    .ifPresent(existing -> {
+                        MerchantGroupMembership closedPredecessor = existing.close(validFrom, now, actor);
+                        auditRecorder.record(
+                                ENTITY_MEMBERSHIP, closedPredecessor.id().toString(), "CLOSE_MEMBERSHIP", existing, closedPredecessor);
+                    });
             auditRecorder.record(ENTITY_MEMBERSHIP, saved.id().toString(), "ASSIGN_MEMBERSHIP", null, saved);
             return saved;
         });

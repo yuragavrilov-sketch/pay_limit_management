@@ -212,9 +212,13 @@ public class PostgresRuntimeManifestRepository implements RuntimeManifestReposit
 
     @Override
     public Optional<RuntimeManifest> findEffectiveManifest(Instant at) {
+        // Spec §4.5: the effective manifest is the one with the MAXIMUM effective_from <= at, not
+        // the highest version -- a later-compiled manifest can carry an earlier effective_from than
+        // an already-scheduled one, so version and effective_from order can diverge. effective_from
+        // is the primary sort; version is only a deterministic tiebreak for equal effective_from.
         return jdbcTemplate.query(manifestSelect() + """
                 where effective_from <= ?
-                order by version desc
+                order by effective_from desc, version desc
                 limit 1
                 """, (rs, rowNum) -> mapManifest(rs), Timestamp.from(at)).stream().findFirst();
     }

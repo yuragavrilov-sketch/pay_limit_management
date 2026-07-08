@@ -35,6 +35,7 @@ import java.math.BigDecimal;
 import java.sql.Timestamp;
 import java.time.Instant;
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -138,6 +139,38 @@ class PostgresRuntimeManifestRepositoryIntegrationTest {
 
         assertThat(repository.findEffectiveManifest(Instant.parse("2026-05-29T10:20:00Z"))).contains(first);
         assertThat(repository.findEffectiveManifest(Instant.parse("2026-05-29T10:30:00Z"))).contains(second);
+    }
+
+    @Test
+    void findEffectiveReturnsGreatestEffectiveFromNotHighestVersionWhenOrdersDiverge() {
+        // Regression for the correctness bug where findEffectiveManifest ordered by `version desc`
+        // instead of `effective_from desc`: compile v1 with a far-future effectiveFrom (a long
+        // lead-time schedule), then compile v2 with a SOONER effectiveFrom. At a time after both
+        // have become due, v1 -- the manifest with the greatest effective_from <= at -- must win,
+        // even though it has the lower version number.
+        SnapshotIds firstIds = insertSnapshot("DIVERGE_FIRST");
+        RuntimeManifest laterEffectiveFromLowerVersion = repository.saveCompiledManifest(version -> manifest(
+                version,
+                firstIds,
+                Instant.parse("2026-05-29T10:00:00Z"),
+                Instant.parse("2026-06-28T00:00:00Z") // T+30d
+        ));
+        SnapshotIds secondIds = insertSnapshot("DIVERGE_SECOND");
+        RuntimeManifest soonerEffectiveFromHigherVersion = repository.saveCompiledManifest(version -> manifest(
+                version,
+                secondIds,
+                Instant.parse("2026-05-29T10:01:00Z"),
+                Instant.parse("2026-05-30T00:00:00Z") // T+1d
+        ));
+
+        assertThat(laterEffectiveFromLowerVersion.version()).isLessThan(soonerEffectiveFromHigherVersion.version());
+        assertThat(laterEffectiveFromLowerVersion.effectiveFrom())
+                .isAfter(soonerEffectiveFromHigherVersion.effectiveFrom());
+
+        Optional<RuntimeManifest> effective =
+                repository.findEffectiveManifest(Instant.parse("2026-06-29T00:00:00Z"));
+
+        assertThat(effective).contains(laterEffectiveFromLowerVersion);
     }
 
     @Test
