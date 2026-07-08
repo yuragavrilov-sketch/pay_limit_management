@@ -1,6 +1,7 @@
 package ru.copperside.paylimits.management.runtimeconfig.application;
 
 import ru.copperside.paylimits.management.audit.application.AuditRecorder;
+import ru.copperside.paylimits.management.common.application.OperationTypeSorting;
 import ru.copperside.paylimits.management.common.invariant.LimitKindConflict;
 import ru.copperside.paylimits.management.common.invariant.LimitKindConflictException;
 import ru.copperside.paylimits.management.common.invariant.LimitKindInvariantChecker;
@@ -200,7 +201,7 @@ public class RuntimeManifestCompiler {
                 rule.code(),
                 rule.version(),
                 new RuntimeCompiledRule.Matcher(
-                        rule.operationTypes().stream().sorted().toList(),
+                        OperationTypeSorting.sorted(rule),
                         rule.direction(),
                         rule.attributeSelector(),
                         rule.limitTargetType()

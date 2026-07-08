@@ -108,7 +108,9 @@ public final class ManifestDocumentV2Mapper {
 
     private static OwnerV2 toOwner(AssignmentOwnerType ownerType, String ownerId) {
         String level = ownerType == null ? null : ownerType.name();
-        // GLOBAL owners carry no id; ownerId is already null for GLOBAL, kept explicit for clarity.
+        // GLOBAL null-owner_id sentinel (see also PostgresLimitAssignmentRepository.hasEnabledOverlap
+        // and V11__global_assignment_level.sql): GLOBAL owners carry no id on the wire, so this maps
+        // straight to null. ownerId is already null for GLOBAL at this point, kept explicit for clarity.
         String id = ownerType == AssignmentOwnerType.GLOBAL ? null : ownerId;
         return new OwnerV2(level, id);
     }

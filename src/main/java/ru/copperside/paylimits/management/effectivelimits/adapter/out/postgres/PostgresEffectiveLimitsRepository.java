@@ -2,8 +2,8 @@ package ru.copperside.paylimits.management.effectivelimits.adapter.out.postgres;
 
 import org.springframework.boot.autoconfigure.condition.ConditionalOnExpression;
 import org.springframework.jdbc.core.JdbcTemplate;
-import org.springframework.jdbc.core.RowCallbackHandler;
 import org.springframework.stereotype.Repository;
+import ru.copperside.paylimits.management.common.persistence.RuleOperationTypeLoader;
 import ru.copperside.paylimits.management.effectivelimits.application.port.out.EffectiveLimitsRepository;
 import ru.copperside.paylimits.management.effectivelimits.domain.EffectiveLimitCandidate;
 import ru.copperside.paylimits.management.limitassignment.domain.AssignmentOwnerType;
@@ -17,14 +17,11 @@ import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Timestamp;
 import java.time.Instant;
-import java.util.LinkedHashMap;
-import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
-import java.util.stream.Collectors;
 
 @Repository
 @ConditionalOnExpression("!'${spring.autoconfigure.exclude:}'.contains('DataSourceAutoConfiguration')")
@@ -68,8 +65,8 @@ public class PostgresEffectiveLimitsRepository implements EffectiveLimitsReposit
         if (rows.isEmpty()) {
             return rows;
         }
-        Map<UUID, Set<String>> operationTypesByRule = loadOperationTypesForRules(
-                rows.stream().map(EffectiveLimitCandidate::ruleId).distinct().toList());
+        Map<UUID, Set<String>> operationTypesByRule = RuleOperationTypeLoader.loadForRules(
+                jdbcTemplate, rows.stream().map(EffectiveLimitCandidate::ruleId).distinct().toList());
         return rows.stream()
                 .map(row -> withOperationTypes(row, operationTypesByRule.getOrDefault(row.ruleId(), Set.of())))
                 .toList();
@@ -119,22 +116,4 @@ public class PostgresEffectiveLimitsRepository implements EffectiveLimitsReposit
                 candidate.limitValue());
     }
 
-    /** Batches the per-rule operationTypes lookup into a single IN-query (mirrors PostgresLimitRuleRepository). */
-    private Map<UUID, Set<String>> loadOperationTypesForRules(List<UUID> ruleIds) {
-        if (ruleIds.isEmpty()) {
-            return Map.of();
-        }
-        String placeholders = ruleIds.stream().map(id -> "?").collect(Collectors.joining(", "));
-        Map<UUID, Set<String>> result = new LinkedHashMap<>();
-        jdbcTemplate.query(
-                "select rule_id, operation_type_code from limit_management.limit_rule_operation_type "
-                        + "where rule_id in (" + placeholders + ") order by rule_id, operation_type_code",
-                (RowCallbackHandler) rs -> {
-                    UUID ruleId = rs.getObject("rule_id", UUID.class);
-                    result.computeIfAbsent(ruleId, key -> new LinkedHashSet<>())
-                            .add(rs.getString("operation_type_code"));
-                },
-                ruleIds.toArray());
-        return result;
-    }
 }

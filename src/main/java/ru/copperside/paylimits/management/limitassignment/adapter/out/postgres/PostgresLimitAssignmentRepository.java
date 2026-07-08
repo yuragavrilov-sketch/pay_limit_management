@@ -74,6 +74,19 @@ public class PostgresLimitAssignmentRepository implements LimitAssignmentReposit
         ), groupId).stream().findFirst();
     }
 
+    /**
+     * GLOBAL null-owner_id sentinel: {@code owner_id} is {@code null} for {@code owner_type = 'GLOBAL'}
+     * assignments (see the {@code limit_assignments_owner_id_shape} check added by
+     * V11__global_assignment_level.sql, which this class does not and must not edit -- it is already
+     * applied). The {@code coalesce(owner_id, '')} below normalizes that null so two GLOBAL rows for
+     * the same rule compare as the same owner for overlap purposes, mirroring the
+     * {@code (coalesce(owner_id, '')) with =} term in that migration's GiST exclusion constraint.
+     * A third place must stay consistent with this null-means-GLOBAL convention:
+     * {@code ManifestDocumentV2Mapper.toOwner}, which maps a GLOBAL assignment's wire-facing id back
+     * to {@code null} (not this empty-string sentinel). If any of these three drifts from the other
+     * two, GLOBAL assignments will either falsely conflict/not-conflict here or serialize incorrectly
+     * to the runtime manifest.
+     */
     @Override
     public boolean hasEnabledOverlap(
             UUID excludedAssignmentId,

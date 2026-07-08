@@ -1,6 +1,7 @@
 package ru.copperside.paylimits.management.limitrule.application;
 
 import ru.copperside.paylimits.management.audit.application.AuditRecorder;
+import ru.copperside.paylimits.management.common.application.OperationTypeSorting;
 import ru.copperside.paylimits.management.common.invariant.port.TransactionRunner;
 import ru.copperside.paylimits.management.limitrule.application.port.out.RuleManifestRepository;
 import ru.copperside.paylimits.management.limitrule.domain.AttributeSelectorType;
@@ -145,7 +146,7 @@ public class RuleManifestCompiler {
                 rule.code(),
                 rule.version(),
                 new CompiledRule.Matcher(
-                        rule.operationTypes().stream().sorted().toList(),
+                        OperationTypeSorting.sorted(rule),
                         rule.direction(),
                         rule.attributeSelector(),
                         rule.limitTargetType()

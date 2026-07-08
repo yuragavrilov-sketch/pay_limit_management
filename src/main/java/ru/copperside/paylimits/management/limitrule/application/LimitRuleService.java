@@ -1,6 +1,7 @@
 package ru.copperside.paylimits.management.limitrule.application;
 
 import ru.copperside.paylimits.management.audit.application.AuditRecorder;
+import ru.copperside.paylimits.management.common.application.RequestValidation;
 import ru.copperside.paylimits.management.common.invariant.LimitKindInvariantChecker;
 import ru.copperside.paylimits.management.common.invariant.port.TransactionRunner;
 import ru.copperside.paylimits.management.limitrule.application.port.out.LimitRuleRepository;
@@ -443,30 +444,19 @@ public class LimitRuleService {
     }
 
     private void requireCommand(Object command) {
-        if (command == null) {
-            throw problem("VALIDATION_ERROR", "command must not be null");
-        }
+        RequestValidation.requireCommand(command, this::problem);
     }
 
     private UUID requireUuid(UUID value, String field) {
-        if (value == null) {
-            throw problem("VALIDATION_ERROR", field + " must not be null");
-        }
-        return value;
+        return RequestValidation.requireUuid(value, field, this::problem);
     }
 
     private <T> T requireEnum(T value, String field) {
-        if (value == null) {
-            throw problem("VALIDATION_ERROR", field + " must not be null");
-        }
-        return value;
+        return RequestValidation.requireEnum(value, field, this::problem);
     }
 
     private String requireText(String value, String field) {
-        if (value == null || value.isBlank()) {
-            throw problem("VALIDATION_ERROR", field + " must not be blank");
-        }
-        return value.trim();
+        return RequestValidation.requireText(value, field, this::problem);
     }
 
     private LimitRuleProblemException problem(String code, String message) {

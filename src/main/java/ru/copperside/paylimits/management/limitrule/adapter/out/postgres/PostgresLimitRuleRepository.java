@@ -3,9 +3,10 @@ package ru.copperside.paylimits.management.limitrule.adapter.out.postgres;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnExpression;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.jdbc.core.JdbcTemplate;
-import org.springframework.jdbc.core.RowCallbackHandler;
 import org.springframework.stereotype.Repository;
 import org.springframework.transaction.annotation.Transactional;
+import ru.copperside.paylimits.management.common.persistence.LimitRuleRowMapper;
+import ru.copperside.paylimits.management.common.persistence.RuleOperationTypeLoader;
 import ru.copperside.paylimits.management.limitrule.application.port.out.LimitRuleRepository;
 import ru.copperside.paylimits.management.limitrule.domain.AggregationScope;
 import ru.copperside.paylimits.management.limitrule.domain.AttributeSelectorType;
@@ -14,27 +15,21 @@ import ru.copperside.paylimits.management.limitrule.domain.DictionaryItem;
 import ru.copperside.paylimits.management.limitrule.domain.LimitRule;
 import ru.copperside.paylimits.management.limitrule.domain.LimitRuleProblemException;
 import ru.copperside.paylimits.management.limitrule.domain.LimitTargetType;
-import ru.copperside.paylimits.management.limitrule.domain.Measure;
 import ru.copperside.paylimits.management.limitrule.domain.OperationDirection;
 import ru.copperside.paylimits.management.limitrule.domain.OperationType;
 import ru.copperside.paylimits.management.limitrule.domain.RuleDictionaries;
 import ru.copperside.paylimits.management.limitrule.domain.RuleMetric;
 import ru.copperside.paylimits.management.limitrule.domain.RulePeriod;
-import ru.copperside.paylimits.management.limitrule.domain.RuleSelector;
-import ru.copperside.paylimits.management.limitrule.domain.RuleStatus;
 
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Timestamp;
 import java.util.Arrays;
-import java.util.LinkedHashMap;
-import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
-import java.util.stream.Collectors;
 
 @Repository
 @ConditionalOnExpression("!'${spring.autoconfigure.exclude:}'.contains('DataSourceAutoConfiguration')")
@@ -158,34 +153,37 @@ public class PostgresLimitRuleRepository implements LimitRuleRepository {
         // Batch operationTypes for the whole page instead of one junction-table query per rule (N+1):
         // map rows with a placeholder set first, then attach the real sets from a single IN-query.
         List<LimitRule> rules = jdbcTemplate.query(
-                ruleSelect() + " order by r.code asc, r.version asc", (rs, rowNum) -> mapRule(rs, Set.of()));
+                LimitRuleRowMapper.RULE_SELECT + " order by r.code asc, r.version asc",
+                (rs, rowNum) -> LimitRuleRowMapper.mapRule(rs, Set.of()));
         if (rules.isEmpty()) {
             return rules;
         }
         Map<UUID, Set<String>> operationTypesByRule =
-                loadOperationTypesForRules(rules.stream().map(LimitRule::id).toList());
+                RuleOperationTypeLoader.loadForRules(jdbcTemplate, rules.stream().map(LimitRule::id).toList());
         return rules.stream()
-                .map(rule -> withOperationTypes(rule, operationTypesByRule.getOrDefault(rule.id(), Set.of())))
+                .map(rule -> LimitRuleRowMapper.withOperationTypes(rule, operationTypesByRule.getOrDefault(rule.id(), Set.of())))
                 .toList();
     }
 
     @Override
     public Optional<LimitRule> findRule(UUID id) {
-        return jdbcTemplate.query(ruleSelect() + " where r.id = ?", (rs, rowNum) -> mapRule(rs), id)
+        return jdbcTemplate.query(LimitRuleRowMapper.RULE_SELECT + " where r.id = ?", (rs, rowNum) -> mapRule(rs), id)
                 .stream()
                 .findFirst();
     }
 
     @Override
     public Optional<LimitRule> findDraftByCode(String code) {
-        return jdbcTemplate.query(ruleSelect() + " where r.code = ? and r.status = 'DRAFT'", (rs, rowNum) -> mapRule(rs), code)
+        return jdbcTemplate.query(LimitRuleRowMapper.RULE_SELECT + " where r.code = ? and r.status = 'DRAFT'",
+                        (rs, rowNum) -> mapRule(rs), code)
                 .stream()
                 .findFirst();
     }
 
     @Override
     public Optional<LimitRule> findActiveByCode(String code) {
-        return jdbcTemplate.query(ruleSelect() + " where r.code = ? and r.status = 'ACTIVE'", (rs, rowNum) -> mapRule(rs), code)
+        return jdbcTemplate.query(LimitRuleRowMapper.RULE_SELECT + " where r.code = ? and r.status = 'ACTIVE'",
+                        (rs, rowNum) -> mapRule(rs), code)
                 .stream()
                 .findFirst();
     }
@@ -295,17 +293,6 @@ public class PostgresLimitRuleRepository implements LimitRuleRepository {
         return Boolean.TRUE.equals(exists);
     }
 
-    private String ruleSelect() {
-        return """
-                select r.id, r.code, r.version, r.name, r.direction,
-                       r.attribute_selector_type, r.attribute_selector_value,
-                       r.target_type, r.metric, r.period, r.aggregation_scope, r.currency,
-                       r.interval_minutes, r.limit_value, r.error_message_template, r.status,
-                       r.created_at, r.updated_at, r.activated_at, r.disabled_at
-                from limit_management.limit_rules r
-                """;
-    }
-
     private DictionaryItem mapDictionaryItem(ResultSet rs) throws SQLException {
         return new DictionaryItem(
                 rs.getString("code"),
@@ -335,76 +322,7 @@ public class PostgresLimitRuleRepository implements LimitRuleRepository {
     /** Single-rule mapping: still one junction-table query per row (fine for {@code findRule}/etc.). */
     private LimitRule mapRule(ResultSet rs) throws SQLException {
         UUID id = rs.getObject("id", UUID.class);
-        return mapRule(rs, loadOperationTypes(id));
-    }
-
-    private LimitRule mapRule(ResultSet rs, Set<String> operationTypes) throws SQLException {
-        UUID id = rs.getObject("id", UUID.class);
-        Timestamp activatedAt = rs.getTimestamp("activated_at");
-        Timestamp disabledAt = rs.getTimestamp("disabled_at");
-        String period = rs.getString("period");
-        String scope = rs.getString("aggregation_scope");
-        String targetType = rs.getString("target_type");
-        Integer intervalMinutes = (Integer) rs.getObject("interval_minutes");
-        return new LimitRule(
-                id,
-                rs.getString("code"),
-                rs.getInt("version"),
-                rs.getString("name"),
-                operationTypes,
-                OperationDirection.valueOf(rs.getString("direction")),
-                new Measure(
-                        RuleMetric.valueOf(rs.getString("metric")),
-                        period == null ? null : RulePeriod.valueOf(period),
-                        scope == null ? null : AggregationScope.valueOf(scope),
-                        rs.getString("currency"),
-                        intervalMinutes),
-                targetType == null ? null : LimitTargetType.valueOf(targetType),
-                rs.getBigDecimal("limit_value"),
-                rs.getString("error_message_template"),
-                new RuleSelector<>(
-                        AttributeSelectorType.valueOf(rs.getString("attribute_selector_type")),
-                        rs.getString("attribute_selector_value")
-                ),
-                RuleStatus.valueOf(rs.getString("status")),
-                rs.getTimestamp("created_at").toInstant(),
-                rs.getTimestamp("updated_at").toInstant(),
-                activatedAt == null ? null : activatedAt.toInstant(),
-                disabledAt == null ? null : disabledAt.toInstant()
-        );
-    }
-
-    private LimitRule withOperationTypes(LimitRule rule, Set<String> operationTypes) {
-        return new LimitRule(
-                rule.id(), rule.code(), rule.version(), rule.name(), operationTypes, rule.direction(),
-                rule.measure(), rule.limitTargetType(), rule.limitValue(), rule.errorMessageTemplate(),
-                rule.attributeSelector(), rule.status(), rule.createdAt(), rule.updatedAt(),
-                rule.activatedAt(), rule.disabledAt());
-    }
-
-    private Set<String> loadOperationTypes(UUID ruleId) {
-        return new LinkedHashSet<>(jdbcTemplate.queryForList(
-                "select operation_type_code from limit_management.limit_rule_operation_type where rule_id = ? order by operation_type_code",
-                String.class, ruleId));
-    }
-
-    /** Batches the per-rule operationTypes lookup into a single IN-query for multi-rule reads. */
-    private Map<UUID, Set<String>> loadOperationTypesForRules(List<UUID> ruleIds) {
-        if (ruleIds.isEmpty()) {
-            return Map.of();
-        }
-        String placeholders = ruleIds.stream().map(id -> "?").collect(Collectors.joining(", "));
-        Map<UUID, Set<String>> result = new LinkedHashMap<>();
-        jdbcTemplate.query(
-                "select rule_id, operation_type_code from limit_management.limit_rule_operation_type "
-                        + "where rule_id in (" + placeholders + ") order by rule_id, operation_type_code",
-                (RowCallbackHandler) rs -> {
-                    UUID ruleId = rs.getObject("rule_id", UUID.class);
-                    result.computeIfAbsent(ruleId, key -> new LinkedHashSet<>())
-                            .add(rs.getString("operation_type_code"));
-                },
-                ruleIds.toArray());
-        return result;
+        return LimitRuleRowMapper.mapRule(rs, RuleOperationTypeLoader.loadForRule(jdbcTemplate, id));
     }
 
     private Timestamp toTimestamp(java.time.Instant instant) {
