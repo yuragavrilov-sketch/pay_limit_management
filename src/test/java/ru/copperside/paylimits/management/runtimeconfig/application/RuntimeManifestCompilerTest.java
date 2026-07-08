@@ -161,6 +161,38 @@ class RuntimeManifestCompilerTest {
     }
 
     @Test
+    void rejectsActiveRuleWithEmptyOperationTypesInsteadOfEmittingEmptyMatcher() {
+        // B1: an ACTIVE rule that somehow carries zero operation types (constructed here in the fake
+        // repository, bypassing service-level validation) must abort compilation rather than ship a
+        // RuleV2 with operationTypes=[] — an empty matcher the engine would read as an all-operations
+        // wildcard. No manifest is persisted.
+        repository.addActiveRule("RULE_EMPTY_OPS", Set.of());
+
+        assertThatThrownBy(() -> compiler.compile(Instant.parse("2026-05-29T10:15:00Z")))
+                .isInstanceOf(RuntimeManifestProblemException.class)
+                .hasMessageContaining("RUNTIME_MANIFEST_INVALID_RULE");
+
+        assertThat(repository.manifests).isEmpty();
+    }
+
+    @Test
+    void compileRuleRejectsEmptyOperationTypesDirectly() {
+        // The guard also holds at the static compileRule entry point used across the codebase, so an
+        // empty-operationTypes rule can never be turned into a RuntimeCompiledRule with an empty matcher.
+        LimitRule emptyOpsRule = new LimitRule(
+                UUID.randomUUID(), "RULE_EMPTY_OPS_DIRECT", 1, "RULE_EMPTY_OPS_DIRECT",
+                Set.of(), OperationDirection.IN,
+                new Measure(RuleMetric.AMOUNT, RulePeriod.DAY, AggregationScope.OWNER, "RUB", null),
+                LimitTargetType.PHONE, new BigDecimal("1000.00"), "template",
+                new RuleSelector<>(AttributeSelectorType.NONE, null), RuleStatus.ACTIVE,
+                Instant.EPOCH, Instant.EPOCH, Instant.EPOCH, null);
+
+        assertThatThrownBy(() -> RuntimeManifestCompiler.compileRule(emptyOpsRule))
+                .isInstanceOf(RuntimeManifestProblemException.class)
+                .hasMessageContaining("RUNTIME_MANIFEST_INVALID_RULE");
+    }
+
+    @Test
     void rejectsEffectiveFromBeforeMinimumLeadTime() {
         repository.addActiveRule("RULE_SBP_PHONE_DAY");
 

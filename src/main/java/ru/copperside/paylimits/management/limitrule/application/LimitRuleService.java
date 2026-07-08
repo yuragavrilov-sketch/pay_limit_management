@@ -78,11 +78,9 @@ public class LimitRuleService {
                 now,
                 now
         );
-        return transactionRunner.run(() -> {
-            OperationType saved = repository.saveOperationType(operationType);
-            auditRecorder.record(ENTITY_OPERATION_TYPE, saved.id().toString(), "CREATE", null, saved);
-            return saved;
-        });
+        return transactionRunner.run(() -> auditRecorder.writeAndRecord(
+                ENTITY_OPERATION_TYPE, "CREATE", null, e -> e.id().toString(),
+                () -> repository.saveOperationType(operationType)));
     }
 
     public OperationType patchOperationType(UUID id, PatchOperationTypeCommand command) {
@@ -105,11 +103,9 @@ public class LimitRuleService {
                 existing.createdAt(),
                 Instant.now(clock)
         );
-        return transactionRunner.run(() -> {
-            OperationType saved = repository.updateOperationType(updated);
-            auditRecorder.record(ENTITY_OPERATION_TYPE, saved.id().toString(), "UPDATE", existing, saved);
-            return saved;
-        });
+        return transactionRunner.run(() -> auditRecorder.writeAndRecord(
+                ENTITY_OPERATION_TYPE, "UPDATE", existing, e -> e.id().toString(),
+                () -> repository.updateOperationType(updated)));
     }
 
     public List<LimitRule> listRules() {
@@ -149,11 +145,9 @@ public class LimitRuleService {
                 null
         );
         rejectExistingDraft(code);
-        return transactionRunner.run(() -> {
-            LimitRule saved = repository.saveRule(rule);
-            auditRecorder.record(ENTITY_LIMIT_RULE, saved.id().toString(), "CREATE", null, saved);
-            return saved;
-        });
+        return transactionRunner.run(() -> auditRecorder.writeAndRecord(
+                ENTITY_LIMIT_RULE, "CREATE", null, e -> e.id().toString(),
+                () -> repository.saveRule(rule)));
     }
 
     public LimitRule patchRule(UUID id, PatchLimitRuleCommand command) {
@@ -202,11 +196,9 @@ public class LimitRuleService {
                 existing.activatedAt(),
                 existing.disabledAt()
         );
-        return transactionRunner.run(() -> {
-            LimitRule saved = repository.updateRule(updated);
-            auditRecorder.record(ENTITY_LIMIT_RULE, saved.id().toString(), "UPDATE", existing, saved);
-            return saved;
-        });
+        return transactionRunner.run(() -> auditRecorder.writeAndRecord(
+                ENTITY_LIMIT_RULE, "UPDATE", existing, e -> e.id().toString(),
+                () -> repository.updateRule(updated)));
     }
 
     public LimitRule activateRule(UUID id) {
@@ -244,9 +236,9 @@ public class LimitRuleService {
         // concurrent assignment/activation changes for the same rule.
         return transactionRunner.run(() -> {
             invariantChecker.checkRuleActivation(existing.id(), now);
-            LimitRule saved = repository.updateRule(updated);
-            auditRecorder.record(ENTITY_LIMIT_RULE, saved.id().toString(), "ACTIVATE", existing, saved);
-            return saved;
+            return auditRecorder.writeAndRecord(
+                    ENTITY_LIMIT_RULE, "ACTIVATE", existing, e -> e.id().toString(),
+                    () -> repository.updateRule(updated));
         });
     }
 
@@ -274,11 +266,9 @@ public class LimitRuleService {
                 existing.activatedAt(),
                 now
         );
-        return transactionRunner.run(() -> {
-            LimitRule saved = repository.updateRule(updated);
-            auditRecorder.record(ENTITY_LIMIT_RULE, saved.id().toString(), "DISABLE", existing, saved);
-            return saved;
-        });
+        return transactionRunner.run(() -> auditRecorder.writeAndRecord(
+                ENTITY_LIMIT_RULE, "DISABLE", existing, e -> e.id().toString(),
+                () -> repository.updateRule(updated)));
     }
 
     public LimitRule createNewVersion(UUID id) {
@@ -306,11 +296,9 @@ public class LimitRuleService {
                 null,
                 null
         );
-        return transactionRunner.run(() -> {
-            LimitRule saved = repository.saveRule(newVersion);
-            auditRecorder.record(ENTITY_LIMIT_RULE, saved.id().toString(), "NEW_VERSION", existing, saved);
-            return saved;
-        });
+        return transactionRunner.run(() -> auditRecorder.writeAndRecord(
+                ENTITY_LIMIT_RULE, "NEW_VERSION", existing, e -> e.id().toString(),
+                () -> repository.saveRule(newVersion)));
     }
 
     /**

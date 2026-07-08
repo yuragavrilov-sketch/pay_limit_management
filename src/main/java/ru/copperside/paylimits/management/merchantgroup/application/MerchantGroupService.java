@@ -54,11 +54,9 @@ public class MerchantGroupService {
                 now,
                 now
         );
-        return transactionRunner.run(() -> {
-            MerchantGroupType saved = repository.saveType(type);
-            auditRecorder.record(ENTITY_GROUP_TYPE, saved.id().toString(), "CREATE", null, saved);
-            return saved;
-        });
+        return transactionRunner.run(() -> auditRecorder.writeAndRecord(
+                ENTITY_GROUP_TYPE, "CREATE", null, e -> e.id().toString(),
+                () -> repository.saveType(type)));
     }
 
     public List<MerchantGroupType> listTypes() {
@@ -79,11 +77,9 @@ public class MerchantGroupService {
                 existing.createdAt(),
                 Instant.now(clock)
         );
-        return transactionRunner.run(() -> {
-            MerchantGroupType saved = repository.updateType(updated);
-            auditRecorder.record(ENTITY_GROUP_TYPE, saved.id().toString(), "UPDATE", existing, saved);
-            return saved;
-        });
+        return transactionRunner.run(() -> auditRecorder.writeAndRecord(
+                ENTITY_GROUP_TYPE, "UPDATE", existing, e -> e.id().toString(),
+                () -> repository.updateType(updated)));
     }
 
     public MerchantGroup createGroup(CreateGroupCommand command) {
@@ -104,11 +100,9 @@ public class MerchantGroupService {
                 now,
                 now
         );
-        return transactionRunner.run(() -> {
-            MerchantGroup saved = repository.saveGroup(group);
-            auditRecorder.record(ENTITY_GROUP, saved.id().toString(), "CREATE", null, saved);
-            return saved;
-        });
+        return transactionRunner.run(() -> auditRecorder.writeAndRecord(
+                ENTITY_GROUP, "CREATE", null, e -> e.id().toString(),
+                () -> repository.saveGroup(group)));
     }
 
     public List<MerchantGroup> listGroups(UUID typeId) {
@@ -129,11 +123,9 @@ public class MerchantGroupService {
                 existing.createdAt(),
                 Instant.now(clock)
         );
-        return transactionRunner.run(() -> {
-            MerchantGroup saved = repository.updateGroup(updated);
-            auditRecorder.record(ENTITY_GROUP, saved.id().toString(), "UPDATE", existing, saved);
-            return saved;
-        });
+        return transactionRunner.run(() -> auditRecorder.writeAndRecord(
+                ENTITY_GROUP, "UPDATE", existing, e -> e.id().toString(),
+                () -> repository.updateGroup(updated)));
     }
 
     public MerchantGroupMembership assignMembership(AssignMembershipCommand command) {

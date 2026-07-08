@@ -7,6 +7,8 @@ import ru.copperside.paylimits.management.audit.domain.AuditEvent;
 import java.time.Clock;
 import java.time.Instant;
 import java.util.UUID;
+import java.util.function.Function;
+import java.util.function.Supplier;
 
 /**
  * Spring-free application helper that assembles and appends an {@link AuditEvent} for a mutating
@@ -53,5 +55,28 @@ public final class AuditRecorder {
                 Instant.now(clock),
                 serializer.toJson(before),
                 serializer.toJson(after)));
+    }
+
+    /**
+     * Runs a single mutating {@code write} and immediately appends its audit event, returning the
+     * written entity. This binds the "persist + audit" pair into one call so a mutation cannot be
+     * committed without its audit row (the copy-paste of {@code write(); record(...); return;} at each
+     * simple mutation site is replaced by one invocation). Both run inside whatever transaction the
+     * caller already opened, so mutation and audit still commit or roll back together (MGT-I-01).
+     *
+     * @param entityId derives the audit {@code entityId} from the freshly written entity (e.g.
+     *                 {@code e -> e.id().toString()}); evaluated after the write so it can read the
+     *                 persisted identity
+     * @param write    the persistence call whose result is both returned and audited as {@code after}
+     */
+    public <T> T writeAndRecord(
+            String entityType,
+            String action,
+            Object before,
+            Function<T, String> entityId,
+            Supplier<T> write) {
+        T result = write.get();
+        record(entityType, entityId.apply(result), action, before, result);
+        return result;
     }
 }

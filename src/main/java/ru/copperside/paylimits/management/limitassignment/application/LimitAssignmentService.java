@@ -83,9 +83,9 @@ public class LimitAssignmentService {
                 invariantChecker.checkGroupAssignment(ruleId, UUID.fromString(ownerId), validFrom);
             }
             rejectOverlap(null, ruleId, ownerType, ownerId, validFrom, validTo, true);
-            LimitAssignment saved = repository.saveAssignment(assignment);
-            auditRecorder.record(ENTITY_ASSIGNMENT, saved.id().toString(), "CREATE", null, saved);
-            return saved;
+            return auditRecorder.writeAndRecord(
+                    ENTITY_ASSIGNMENT, "CREATE", null, e -> e.id().toString(),
+                    () -> repository.saveAssignment(assignment));
         });
     }
 
@@ -112,11 +112,9 @@ public class LimitAssignmentService {
                 existing.createdAt(),
                 Instant.now(clock)
         );
-        return transactionRunner.run(() -> {
-            LimitAssignment saved = repository.updateAssignment(updated);
-            auditRecorder.record(ENTITY_ASSIGNMENT, saved.id().toString(), "UPDATE", existing, saved);
-            return saved;
-        });
+        return transactionRunner.run(() -> auditRecorder.writeAndRecord(
+                ENTITY_ASSIGNMENT, "UPDATE", existing, e -> e.id().toString(),
+                () -> repository.updateAssignment(updated)));
     }
 
     public LimitAssignment disableAssignment(UUID assignmentId) {
@@ -134,11 +132,9 @@ public class LimitAssignmentService {
                 existing.createdAt(),
                 Instant.now(clock)
         );
-        return transactionRunner.run(() -> {
-            LimitAssignment saved = repository.updateAssignment(updated);
-            auditRecorder.record(ENTITY_ASSIGNMENT, saved.id().toString(), "DISABLE", existing, saved);
-            return saved;
-        });
+        return transactionRunner.run(() -> auditRecorder.writeAndRecord(
+                ENTITY_ASSIGNMENT, "DISABLE", existing, e -> e.id().toString(),
+                () -> repository.updateAssignment(updated)));
     }
 
     private void validateRule(UUID ruleId) {

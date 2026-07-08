@@ -184,6 +184,17 @@ public class RuntimeManifestCompiler {
     }
 
     public static RuntimeCompiledRule compileRule(LimitRule rule) {
+        // An ACTIVE rule with no operation types would compile to a matcher whose operationTypes list
+        // is empty. The engine treats a manifest matcher as "matches when every listed dimension
+        // matches", so an empty operationTypes list is an all-operations wildcard — never the intent of
+        // an admin who simply left the set empty. The sibling RuleManifestCompiler.validateStructure
+        // already rejects this via a diagnostic; guard the runtime compiler the same way so such a rule
+        // aborts compilation (422) instead of shipping an empty-matcher rule to the engine.
+        if (rule.operationTypes().isEmpty()) {
+            throw new RuntimeManifestProblemException(
+                    "RUNTIME_MANIFEST_INVALID_RULE",
+                    "Active rule must reference at least one operation type: " + rule.code());
+        }
         return new RuntimeCompiledRule(
                 rule.id(),
                 rule.code(),
