@@ -12,6 +12,7 @@ import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 import ru.copperside.paylimits.management.common.invariant.port.LimitKindInvariantRepository;
+import ru.copperside.paylimits.management.common.invariant.port.LimitKindInvariantRepository.MemberOtherGroupKind;
 import ru.copperside.paylimits.management.common.invariant.port.LimitKindInvariantRepository.MerchantGroupKind;
 import ru.copperside.paylimits.management.limitrule.domain.LimitKind;
 import ru.copperside.paylimits.management.limitrule.domain.LimitTargetType;
@@ -238,6 +239,96 @@ class PostgresLimitKindInvariantRepositoryIntegrationTest {
         assertThat(repository.groupsWithEnabledAssignmentForRule(rule, NOW)).containsExactly(liveGroup);
         assertThat(repository.groupsWithEnabledAssignmentForRule(rule, NOW.plusSeconds(2 * 86400)))
                 .containsExactlyInAnyOrder(liveGroup, futureGroup);
+    }
+
+    // ---- Task 3 (E2): single-query replacement for looping membersOfGroup +
+    // kindsReceivedByMerchantExcludingGroup per member ----
+
+    @Test
+    void kindsReceivedByMembersOfGroupReturnsPerMemberOtherGroupKindTriplesRespectingValidityWindows() {
+        UUID targetType = insertGroupType();
+        UUID otherTypeA = insertGroupType();
+        UUID otherTypeB = insertGroupType();
+        UUID expiredType = insertGroupType();
+        UUID nonMemberType = insertGroupType();
+
+        UUID targetGroup = insertGroup(targetType);
+        UUID otherGroupA = insertGroup(otherTypeA); // delivers a kind to merchantA
+        UUID otherGroupB = insertGroup(otherTypeB); // delivers a kind to merchantB
+        UUID expiredGroup = insertGroup(expiredType); // merchantA's assignment here has expired
+        UUID unrelatedGroup = insertGroup(nonMemberType); // delivers a kind, but to a NON-member
+
+        String merchantA = "990101";
+        String merchantB = "990102";
+        String nonMember = "990103";
+
+        // Two members of the target group.
+        insertMembership(merchantA, targetGroup, targetType, NOW.minusSeconds(86400), null);
+        insertMembership(merchantB, targetGroup, targetType, NOW.minusSeconds(86400), null);
+        // A merchant belonging to unrelatedGroup but NOT to targetGroup must not appear in the result.
+        insertMembership(nonMember, unrelatedGroup, nonMemberType, NOW.minusSeconds(86400), null);
+
+        // merchantA also belongs to otherGroupA, which delivers a kind via a live assignment.
+        UUID ruleA = insertRule("E2_RULE_A", RuleMetric.COUNT, RulePeriod.DAY, LimitTargetType.PHONE,
+                OperationDirection.IN, "ACTIVE", Set.of("SBP_C2B"));
+        insertAssignment(ruleA, "MERCHANT_GROUP", otherGroupA.toString(), true);
+        insertMembership(merchantA, otherGroupA, otherTypeA, NOW.minusSeconds(86400), null);
+
+        // merchantB also belongs to otherGroupB, which delivers a different kind via a live assignment.
+        UUID ruleB = insertRule("E2_RULE_B", RuleMetric.AMOUNT, RulePeriod.MONTH, LimitTargetType.ACCOUNT,
+                OperationDirection.OUT, "ACTIVE", Set.of("SBP_B2C"));
+        insertAssignment(ruleB, "MERCHANT_GROUP", otherGroupB.toString(), true);
+        insertMembership(merchantB, otherGroupB, otherTypeB, NOW.minusSeconds(86400), null);
+
+        // merchantA also belongs to expiredGroup, whose assignment window has closed before NOW:
+        // must NOT contribute a triple (validity window respected).
+        UUID expiredRule = insertRule("E2_RULE_EXPIRED", RuleMetric.COUNT, RulePeriod.WEEK, LimitTargetType.CARD,
+                OperationDirection.IN, "ACTIVE", Set.of("SBP_C2B"));
+        insertAssignmentWithWindow(expiredRule, expiredGroup.toString(), true,
+                NOW.minusSeconds(10 * 86400), NOW.minusSeconds(86400));
+        insertMembership(merchantA, expiredGroup, expiredType, NOW.minusSeconds(86400), null);
+
+        // unrelatedGroup delivers a kind, but only to nonMember (not a member of targetGroup) — must
+        // not appear (the join starts from targetGroup's own membership rows).
+        UUID unrelatedRule = insertRule("E2_RULE_UNRELATED", RuleMetric.COUNT, RulePeriod.DAY, LimitTargetType.PHONE,
+                OperationDirection.IN, "ACTIVE", Set.of("SBP_C2B"));
+        insertAssignment(unrelatedRule, "MERCHANT_GROUP", unrelatedGroup.toString(), true);
+
+        List<MemberOtherGroupKind> received = repository.kindsReceivedByMembersOfGroup(targetGroup, NOW);
+
+        assertThat(received).containsExactlyInAnyOrder(
+                new MemberOtherGroupKind(merchantA, otherGroupA,
+                        new LimitKind(RuleMetric.COUNT, RulePeriod.DAY, LimitTargetType.PHONE,
+                                OperationDirection.IN, Set.of("SBP_C2B"))),
+                new MemberOtherGroupKind(merchantB, otherGroupB,
+                        new LimitKind(RuleMetric.AMOUNT, RulePeriod.MONTH, LimitTargetType.ACCOUNT,
+                                OperationDirection.OUT, Set.of("SBP_B2C"))));
+    }
+
+    @Test
+    void kindsReceivedByMembersOfGroupExcludesMemberWhoLeftBeforeTheCheckInstant() {
+        UUID targetType = insertGroupType();
+        UUID otherType = insertGroupType();
+        UUID targetGroup = insertGroup(targetType);
+        UUID otherGroup = insertGroup(otherType);
+        String merchantId = "990104";
+
+        // Membership in targetGroup closed before NOW: not a current-or-future member at NOW.
+        insertMembership(merchantId, targetGroup, targetType, NOW.minusSeconds(10 * 86400), NOW.minusSeconds(86400));
+
+        UUID rule = insertRule("E2_RULE_PAST_MEMBER", RuleMetric.COUNT, RulePeriod.DAY, LimitTargetType.PHONE,
+                OperationDirection.IN, "ACTIVE", Set.of("SBP_C2B"));
+        // Assignment window spans both check instants below, so only the membership window drives
+        // the assertions.
+        insertAssignmentWithWindow(rule, otherGroup.toString(), true, NOW.minusSeconds(20 * 86400), null);
+        insertMembership(merchantId, otherGroup, otherType, NOW.minusSeconds(20 * 86400), null);
+
+        assertThat(repository.kindsReceivedByMembersOfGroup(targetGroup, NOW)).isEmpty();
+        // Earlier, while still a member, the triple is present.
+        assertThat(repository.kindsReceivedByMembersOfGroup(targetGroup, NOW.minusSeconds(5 * 86400)))
+                .containsExactly(new MemberOtherGroupKind(merchantId, otherGroup,
+                        new LimitKind(RuleMetric.COUNT, RulePeriod.DAY, LimitTargetType.PHONE,
+                                OperationDirection.IN, Set.of("SBP_C2B"))));
     }
 
     @Test

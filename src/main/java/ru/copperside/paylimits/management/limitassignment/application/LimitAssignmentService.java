@@ -100,18 +100,7 @@ public class LimitAssignmentService {
         validatePeriod(validFrom, validTo);
         rejectOverlap(existing.id(), existing.ruleId(), existing.ownerType(), existing.ownerId(), validFrom, validTo, enabled);
 
-        LimitAssignment updated = new LimitAssignment(
-                existing.id(),
-                existing.ruleId(),
-                existing.ownerType(),
-                existing.ownerId(),
-                limitMode,
-                validFrom,
-                validTo,
-                enabled,
-                existing.createdAt(),
-                Instant.now(clock)
-        );
+        LimitAssignment updated = existing.patched(limitMode, validFrom, validTo, enabled, Instant.now(clock));
         return transactionRunner.run(() -> auditRecorder.writeAndRecord(
                 ENTITY_ASSIGNMENT, "UPDATE", existing, e -> e.id().toString(),
                 () -> repository.updateAssignment(updated)));
@@ -120,18 +109,7 @@ public class LimitAssignmentService {
     public LimitAssignment disableAssignment(UUID assignmentId) {
         LimitAssignment existing = repository.findAssignment(requireUuid(assignmentId, "assignmentId"))
                 .orElseThrow(() -> problem("ASSIGNMENT_NOT_FOUND", "Assignment not found"));
-        LimitAssignment updated = new LimitAssignment(
-                existing.id(),
-                existing.ruleId(),
-                existing.ownerType(),
-                existing.ownerId(),
-                existing.limitMode(),
-                existing.validFrom(),
-                existing.validTo(),
-                false,
-                existing.createdAt(),
-                Instant.now(clock)
-        );
+        LimitAssignment updated = existing.disabled(Instant.now(clock));
         return transactionRunner.run(() -> auditRecorder.writeAndRecord(
                 ENTITY_ASSIGNMENT, "DISABLE", existing, e -> e.id().toString(),
                 () -> repository.updateAssignment(updated)));

@@ -213,24 +213,7 @@ public class LimitRuleService {
         // deferring the discovery to manifest compilation.
         resolveOperationTypes(existing.operationTypes(), existing.direction());
         Instant now = Instant.now(clock);
-        LimitRule updated = new LimitRule(
-                existing.id(),
-                existing.code(),
-                existing.version(),
-                existing.name(),
-                existing.operationTypes(),
-                existing.direction(),
-                existing.measure(),
-                existing.limitTargetType(),
-                existing.limitValue(),
-                existing.errorMessageTemplate(),
-                existing.attributeSelector(),
-                RuleStatus.ACTIVE,
-                existing.createdAt(),
-                now,
-                now,
-                existing.disabledAt()
-        );
+        LimitRule updated = existing.activated(now);
         // Lock (by rule), the non-overlap invariant check across the rule's group assignments, and
         // the status write share a single transaction so the advisory lock actually serializes
         // concurrent assignment/activation changes for the same rule.
@@ -248,24 +231,7 @@ public class LimitRuleService {
             throw problem("RULE_STATUS_CONFLICT", "Only active rules can be disabled");
         }
         Instant now = Instant.now(clock);
-        LimitRule updated = new LimitRule(
-                existing.id(),
-                existing.code(),
-                existing.version(),
-                existing.name(),
-                existing.operationTypes(),
-                existing.direction(),
-                existing.measure(),
-                existing.limitTargetType(),
-                existing.limitValue(),
-                existing.errorMessageTemplate(),
-                existing.attributeSelector(),
-                RuleStatus.DISABLED,
-                existing.createdAt(),
-                now,
-                existing.activatedAt(),
-                now
-        );
+        LimitRule updated = existing.disabled(now);
         return transactionRunner.run(() -> auditRecorder.writeAndRecord(
                 ENTITY_LIMIT_RULE, "DISABLE", existing, e -> e.id().toString(),
                 () -> repository.updateRule(updated)));
@@ -278,24 +244,7 @@ public class LimitRuleService {
         }
         rejectExistingDraft(existing.code());
         Instant now = Instant.now(clock);
-        LimitRule newVersion = new LimitRule(
-                UUID.randomUUID(),
-                existing.code(),
-                repository.nextVersion(existing.code()),
-                existing.name(),
-                existing.operationTypes(),
-                existing.direction(),
-                existing.measure(),
-                existing.limitTargetType(),
-                existing.limitValue(),
-                existing.errorMessageTemplate(),
-                existing.attributeSelector(),
-                RuleStatus.DRAFT,
-                now,
-                now,
-                null,
-                null
-        );
+        LimitRule newVersion = existing.asNewDraftVersion(UUID.randomUUID(), repository.nextVersion(existing.code()), now);
         return transactionRunner.run(() -> auditRecorder.writeAndRecord(
                 ENTITY_LIMIT_RULE, "NEW_VERSION", existing, e -> e.id().toString(),
                 () -> repository.saveRule(newVersion)));

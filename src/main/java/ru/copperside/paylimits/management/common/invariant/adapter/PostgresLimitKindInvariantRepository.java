@@ -159,6 +159,37 @@ public class PostgresLimitKindInvariantRepository implements LimitKindInvariantR
                 .findFirst();
     }
 
+    @Override
+    public List<MemberOtherGroupKind> kindsReceivedByMembersOfGroup(UUID groupId, Instant at) {
+        // Single round-trip for the whole group: m1 = current-or-future members of groupId, joined to
+        // each such merchant's OTHER current-or-future memberships (m2, group_id <> groupId), joined to
+        // that other group's enabled MERCHANT_GROUP assignments of ACTIVE rules whose own validity
+        // window contains `at`. Both membership sides and the assignment window are filtered at `at`,
+        // mirroring kindsReceivedByMerchantExcludingGroup(s).
+        Timestamp instant = Timestamp.from(at);
+        return jdbcTemplate.query("""
+                select m1.merchant_id as merchant_id, m2.group_id as other_group_id,
+                       r.metric, r.period, r.target_type, r.direction,
+                       array_agg(ot.operation_type_code) as operation_types
+                from limit_management.merchant_group_memberships m1
+                join limit_management.merchant_group_memberships m2
+                    on m2.merchant_id = m1.merchant_id
+                    and m2.group_id <> m1.group_id
+                    and (m2.valid_to is null or m2.valid_to > ?)
+                join limit_management.limit_assignments a
+                    on a.owner_type = 'MERCHANT_GROUP' and a.owner_id = m2.group_id::text and a.enabled = true
+                    and a.valid_from <= ? and (a.valid_to is null or a.valid_to > ?)
+                join limit_management.limit_rules r on r.id = a.rule_id and r.status = 'ACTIVE'
+                join limit_management.limit_rule_operation_type ot on ot.rule_id = r.id
+                where m1.group_id = ?
+                  and (m1.valid_to is null or m1.valid_to > ?)
+                group by m1.merchant_id, m2.group_id, r.id, r.metric, r.period, r.target_type, r.direction
+                """,
+                (rs, rowNum) -> new MemberOtherGroupKind(
+                        rs.getString("merchant_id"), rs.getObject("other_group_id", UUID.class), mapKind(rs)),
+                instant, instant, instant, groupId, instant);
+    }
+
     private LimitKind mapKind(ResultSet rs) throws SQLException {
         String period = rs.getString("period");
         String targetType = rs.getString("target_type");

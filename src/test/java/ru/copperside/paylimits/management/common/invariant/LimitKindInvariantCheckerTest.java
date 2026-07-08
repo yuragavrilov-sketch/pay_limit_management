@@ -2,6 +2,7 @@ package ru.copperside.paylimits.management.common.invariant;
 
 import org.junit.jupiter.api.Test;
 import ru.copperside.paylimits.management.common.invariant.port.LimitKindInvariantRepository;
+import ru.copperside.paylimits.management.common.invariant.port.LimitKindInvariantRepository.MemberOtherGroupKind;
 import ru.copperside.paylimits.management.common.invariant.port.LimitKindInvariantRepository.MerchantGroupKind;
 import ru.copperside.paylimits.management.limitrule.domain.LimitKind;
 import ru.copperside.paylimits.management.limitrule.domain.LimitTargetType;
@@ -96,9 +97,8 @@ class LimitKindInvariantCheckerTest {
         UUID groupId = UUID.randomUUID();
         UUID otherGroup = UUID.randomUUID();
         when(repository.kindOfRule(ruleId)).thenReturn(Optional.of(COUNT_DAY_PHONE_IN));
-        when(repository.membersOfGroup(groupId, AT)).thenReturn(List.of("502118"));
-        when(repository.kindsReceivedByMerchantExcludingGroup("502118", groupId, AT))
-                .thenReturn(List.of(new MerchantGroupKind(otherGroup, COUNT_DAY_PHONE_IN)));
+        when(repository.kindsReceivedByMembersOfGroup(groupId, AT))
+                .thenReturn(List.of(new MemberOtherGroupKind("502118", otherGroup, COUNT_DAY_PHONE_IN)));
 
         LimitKindConflictException ex = catchThrowableOfType(
                 () -> checker.checkGroupAssignment(ruleId, groupId, AT), LimitKindConflictException.class);
@@ -117,9 +117,8 @@ class LimitKindInvariantCheckerTest {
         UUID ruleId = UUID.randomUUID();
         UUID groupId = UUID.randomUUID();
         when(repository.kindOfRule(ruleId)).thenReturn(Optional.of(COUNT_DAY_PHONE_IN));
-        when(repository.membersOfGroup(groupId, AT)).thenReturn(List.of("502118"));
-        when(repository.kindsReceivedByMerchantExcludingGroup("502118", groupId, AT))
-                .thenReturn(List.of(new MerchantGroupKind(UUID.randomUUID(), DISJOINT_AMOUNT_MONTH)));
+        when(repository.kindsReceivedByMembersOfGroup(groupId, AT))
+                .thenReturn(List.of(new MemberOtherGroupKind("502118", UUID.randomUUID(), DISJOINT_AMOUNT_MONTH)));
 
         assertThatCode(() -> checker.checkGroupAssignment(ruleId, groupId, AT)).doesNotThrowAnyException();
         verify(repository).lockRule(ruleId);
@@ -144,9 +143,8 @@ class LimitKindInvariantCheckerTest {
         UUID otherGroup = UUID.randomUUID();
         when(repository.kindOfRule(ruleId)).thenReturn(Optional.of(COUNT_DAY_PHONE_IN));
         when(repository.groupsWithEnabledAssignmentForRule(ruleId, AT)).thenReturn(List.of(assignedGroup));
-        when(repository.membersOfGroup(assignedGroup, AT)).thenReturn(List.of("502118"));
-        when(repository.kindsReceivedByMerchantExcludingGroup("502118", assignedGroup, AT))
-                .thenReturn(List.of(new MerchantGroupKind(otherGroup, COUNT_DAY_PHONE_IN)));
+        when(repository.kindsReceivedByMembersOfGroup(assignedGroup, AT))
+                .thenReturn(List.of(new MemberOtherGroupKind("502118", otherGroup, COUNT_DAY_PHONE_IN)));
 
         assertThatThrownBy(() -> checker.checkRuleActivation(ruleId, AT))
                 .isInstanceOf(LimitKindConflictException.class);
@@ -161,7 +159,7 @@ class LimitKindInvariantCheckerTest {
 
         assertThatCode(() -> checker.checkRuleActivation(ruleId, AT)).doesNotThrowAnyException();
         verify(repository).lockRule(ruleId);
-        verify(repository, org.mockito.Mockito.never()).membersOfGroup(any(), any());
+        verify(repository, org.mockito.Mockito.never()).kindsReceivedByMembersOfGroup(any(), any());
     }
 
     // ---- snapshot re-check (compilation, checkpoint d) ----

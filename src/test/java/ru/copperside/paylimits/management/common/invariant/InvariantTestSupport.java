@@ -1,6 +1,7 @@
 package ru.copperside.paylimits.management.common.invariant;
 
 import ru.copperside.paylimits.management.common.invariant.port.LimitKindInvariantRepository;
+import ru.copperside.paylimits.management.common.invariant.port.LimitKindInvariantRepository.MemberOtherGroupKind;
 import ru.copperside.paylimits.management.common.invariant.port.TransactionRunner;
 import ru.copperside.paylimits.management.limitrule.domain.LimitKind;
 
@@ -76,6 +77,11 @@ public final class InvariantTestSupport {
         @Override
         public Optional<LimitKind> kindOfRule(java.util.UUID ruleId) {
             return Optional.empty();
+        }
+
+        @Override
+        public List<MemberOtherGroupKind> kindsReceivedByMembersOfGroup(java.util.UUID groupId, Instant at) {
+            return List.of();
         }
     }
 }

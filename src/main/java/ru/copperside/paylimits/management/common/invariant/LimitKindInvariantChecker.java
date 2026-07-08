@@ -1,6 +1,7 @@
 package ru.copperside.paylimits.management.common.invariant;
 
 import ru.copperside.paylimits.management.common.invariant.port.LimitKindInvariantRepository;
+import ru.copperside.paylimits.management.common.invariant.port.LimitKindInvariantRepository.MemberOtherGroupKind;
 import ru.copperside.paylimits.management.common.invariant.port.LimitKindInvariantRepository.MerchantGroupKind;
 import ru.copperside.paylimits.management.limitrule.domain.LimitKind;
 
@@ -142,12 +143,10 @@ public class LimitKindInvariantChecker {
 
     private List<LimitKindConflict> collectGroupConflicts(LimitKind ruleKind, UUID groupId, Instant at) {
         List<LimitKindConflict> conflicts = new ArrayList<>();
-        for (String merchantId : repository.membersOfGroup(groupId, at)) {
-            for (MerchantGroupKind other : repository.kindsReceivedByMerchantExcludingGroup(merchantId, groupId, at)) {
-                if (ruleKind.conflictsWith(other.kind())) {
-                    conflicts.add(new LimitKindConflict(
-                            merchantId, LimitKindView.of(ruleKind), other.groupId(), groupId));
-                }
+        for (MemberOtherGroupKind other : repository.kindsReceivedByMembersOfGroup(groupId, at)) {
+            if (ruleKind.conflictsWith(other.kind())) {
+                conflicts.add(new LimitKindConflict(
+                        other.merchantId(), LimitKindView.of(ruleKind), other.otherGroupId(), groupId));
             }
         }
         return conflicts;

@@ -73,6 +73,24 @@ public interface LimitKindInvariantRepository {
      */
     Optional<LimitKind> kindOfRule(UUID ruleId);
 
+    /**
+     * For every merchant who is a current-or-future member of {@code groupId} as of {@code at}
+     * ({@code valid_to is null or valid_to > at}), the {@link LimitKind}s delivered to them by
+     * OTHER groups (group id different from {@code groupId}) they also belong to at {@code at}.
+     * Only enabled {@code MERCHANT_GROUP} assignments of {@code ACTIVE} rules whose own validity
+     * window contains {@code at} ({@code valid_from <= at and (valid_to is null or valid_to > at)})
+     * are considered, mirroring {@link #kindsReceivedByMerchantExcludingGroup(String, UUID, Instant)}.
+     *
+     * <p>Single round-trip replacement for looping {@link #membersOfGroup(UUID, Instant)} and
+     * calling {@link #kindsReceivedByMerchantExcludingGroup(String, UUID, Instant)} once per member —
+     * used by the group-assignment and rule-activation invariant checkpoints, which run under the
+     * rule advisory lock.
+     */
+    List<MemberOtherGroupKind> kindsReceivedByMembersOfGroup(UUID groupId, Instant at);
+
     record MerchantGroupKind(UUID groupId, LimitKind kind) {
+    }
+
+    record MemberOtherGroupKind(String merchantId, UUID otherGroupId, LimitKind kind) {
     }
 }
