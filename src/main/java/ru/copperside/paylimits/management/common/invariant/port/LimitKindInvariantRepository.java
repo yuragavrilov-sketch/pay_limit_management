@@ -30,10 +30,12 @@ public interface LimitKindInvariantRepository {
     void lockRule(UUID ruleId);
 
     /**
-     * The distinct {@link LimitKind}s delivered to merchants by a group, derived from that
-     * group's enabled {@code MERCHANT_GROUP} assignments of {@code ACTIVE} rules.
+     * The distinct {@link LimitKind}s delivered to merchants by a group as of {@code at}, derived from
+     * that group's enabled {@code MERCHANT_GROUP} assignments of {@code ACTIVE} rules whose validity
+     * window contains {@code at} ({@code valid_from <= at and (valid_to is null or valid_to > at)}).
+     * The invariant is temporal: an assignment only delivers its kind while it is in effect.
      */
-    List<LimitKind> kindsDeliveredByGroup(UUID groupId);
+    List<LimitKind> kindsDeliveredByGroup(UUID groupId, Instant at);
 
     /**
      * The merchant ids that are current-or-future members of a group as of {@code at}
@@ -58,9 +60,11 @@ public interface LimitKindInvariantRepository {
             String merchantId, java.util.Collection<UUID> excludedGroupIds, Instant at);
 
     /**
-     * The groups that have an enabled {@code MERCHANT_GROUP} assignment of the given rule.
+     * The groups that have an enabled {@code MERCHANT_GROUP} assignment of the given rule whose
+     * validity window contains {@code at} ({@code valid_from <= at and (valid_to is null or
+     * valid_to > at)}). An expired assignment no longer delivers its kind, so it does not participate.
      */
-    List<UUID> groupsWithEnabledAssignmentForRule(UUID ruleId);
+    List<UUID> groupsWithEnabledAssignmentForRule(UUID ruleId, Instant at);
 
     /**
      * The {@link LimitKind} of a rule by id (any status), or empty if the rule does not exist.

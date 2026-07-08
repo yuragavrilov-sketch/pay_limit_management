@@ -53,10 +53,14 @@ public class PostgresLimitKindInvariantRepository implements LimitKindInvariantR
     }
 
     @Override
-    public List<LimitKind> kindsDeliveredByGroup(UUID groupId) {
+    public List<LimitKind> kindsDeliveredByGroup(UUID groupId, Instant at) {
         // Intentional INNER join here (vs. the LEFT join in kindOfRule below): a rule with zero
         // operation types can't be ACTIVE (validation 1-4), so an INNER join never silently drops a
         // deliverable kind for this query.
+        //
+        // The assignment's own validity window is filtered at `at`: an expired (or not-yet-effective)
+        // assignment no longer delivers its kind, so it must not participate in the invariant scan.
+        Timestamp instant = Timestamp.from(at);
         return jdbcTemplate.query("""
                 select r.metric, r.period, r.target_type, r.direction,
                        array_agg(ot.operation_type_code) as operation_types
@@ -64,9 +68,10 @@ public class PostgresLimitKindInvariantRepository implements LimitKindInvariantR
                 join limit_management.limit_rules r on r.id = a.rule_id
                 join limit_management.limit_rule_operation_type ot on ot.rule_id = r.id
                 where a.owner_type = 'MERCHANT_GROUP' and a.owner_id = ? and a.enabled = true
+                  and a.valid_from <= ? and (a.valid_to is null or a.valid_to > ?)
                   and r.status = 'ACTIVE'
                 group by r.id, r.metric, r.period, r.target_type, r.direction
-                """, (rs, rowNum) -> mapKind(rs), groupId.toString());
+                """, (rs, rowNum) -> mapKind(rs), groupId.toString(), instant, instant);
     }
 
     @Override
@@ -89,20 +94,28 @@ public class PostgresLimitKindInvariantRepository implements LimitKindInvariantR
         List<UUID> excluded = excludedGroupIds == null
                 ? List.of()
                 : List.copyOf(new LinkedHashSet<>(excludedGroupIds));
+        // The `?` placeholders bind positionally in textual order: the two in the assignment join come
+        // first, then the merchant id, then the membership window instant. Both the membership side
+        // (m.valid_to) AND the assignment side (a.valid_from/a.valid_to) are filtered at `at` so an
+        // expired-but-enabled assignment no longer counts as delivering its kind.
+        Timestamp instant = Timestamp.from(at);
         StringBuilder sql = new StringBuilder("""
                 select m.group_id as membership_group_id, r.metric, r.period, r.target_type, r.direction,
                        array_agg(ot.operation_type_code) as operation_types
                 from limit_management.merchant_group_memberships m
                 join limit_management.limit_assignments a
                     on a.owner_type = 'MERCHANT_GROUP' and a.owner_id = m.group_id::text and a.enabled = true
+                    and a.valid_from <= ? and (a.valid_to is null or a.valid_to > ?)
                 join limit_management.limit_rules r on r.id = a.rule_id and r.status = 'ACTIVE'
                 join limit_management.limit_rule_operation_type ot on ot.rule_id = r.id
                 where m.merchant_id = ?
                   and (m.valid_to is null or m.valid_to > ?)
                 """);
         List<Object> params = new java.util.ArrayList<>();
+        params.add(instant);
+        params.add(instant);
         params.add(merchantId);
-        params.add(Timestamp.from(at));
+        params.add(instant);
         if (!excluded.isEmpty()) {
             String placeholders = excluded.stream().map(id -> "?").collect(java.util.stream.Collectors.joining(", "));
             sql.append("  and m.group_id not in (").append(placeholders).append(")\n");
@@ -115,12 +128,16 @@ public class PostgresLimitKindInvariantRepository implements LimitKindInvariantR
     }
 
     @Override
-    public List<UUID> groupsWithEnabledAssignmentForRule(UUID ruleId) {
+    public List<UUID> groupsWithEnabledAssignmentForRule(UUID ruleId, Instant at) {
+        // Only assignments in effect at `at` participate: an expired (or not-yet-effective) assignment
+        // no longer delivers the rule's kind and must not trigger a false activation conflict.
+        Timestamp instant = Timestamp.from(at);
         return jdbcTemplate.query("""
                 select distinct owner_id
                 from limit_management.limit_assignments
                 where owner_type = 'MERCHANT_GROUP' and rule_id = ? and enabled = true
-                """, (rs, rowNum) -> UUID.fromString(rs.getString("owner_id")), ruleId);
+                  and valid_from <= ? and (valid_to is null or valid_to > ?)
+                """, (rs, rowNum) -> UUID.fromString(rs.getString("owner_id")), ruleId, instant, instant);
     }
 
     @Override

@@ -383,6 +383,60 @@ class RuntimeManifestCompilerTest {
     }
 
     @Test
+    void compilesWhenAnExpiredButEnabledAssignmentWouldOtherwiseDuplicateAKindFromALiveGroup() {
+        // Finding #2 regression: a merchant belongs to two groups, each with an ENABLED
+        // MERCHANT_GROUP assignment of an active rule of the same kind, but one assignment has
+        // naturally EXPIRED (valid_to in the past at the compile instant). An expired assignment no
+        // longer delivers its kind, so the snapshot invariant scan must ignore it and compilation
+        // SUCCEEDS. The manifest PAYLOAD, however, still carries both assignment rows unchanged.
+        String merchantId = "700012";
+        LimitRule ruleExpired = repository.addActiveRule("RULE_EXPIRED_GROUP");
+        LimitRule ruleLive = repository.addActiveRule("RULE_LIVE_ASSIGN");
+        UUID expiredGroup = UUID.randomUUID();
+        UUID liveGroup = UUID.randomUUID();
+        // Expired-but-enabled: valid_to before NOW (2026-05-29T10:00:00Z).
+        repository.addAssignment(ruleExpired.id(), ruleExpired.code(), AssignmentOwnerType.MERCHANT_GROUP,
+                expiredGroup.toString(), LimitMode.LIMITED,
+                Instant.parse("2026-05-01T00:00:00Z"), Instant.parse("2026-05-20T00:00:00Z"));
+        repository.addAssignment(ruleLive.id(), ruleLive.code(), AssignmentOwnerType.MERCHANT_GROUP,
+                liveGroup.toString(), LimitMode.LIMITED);
+        repository.addMembership(merchantId, expiredGroup);
+        repository.addMembership(merchantId, liveGroup);
+
+        RuntimeManifest manifest = compiler.compile(Instant.parse("2026-05-29T10:15:00Z"));
+
+        assertThat(manifest.version()).isEqualTo(1);
+        assertThat(repository.manifests).containsExactly(manifest);
+        // Payload still carries BOTH assignments (expired one included) — only the invariant scan filters.
+        assertThat(manifest.assignmentCount()).isEqualTo(2);
+        assertThat(manifest.assignments()).hasSize(2);
+    }
+
+    @Test
+    void rejectsCompilationWhenAStillActiveAssignmentDuplicatesAKindFromALiveGroup() {
+        // The counterpart of the expired-assignment case: both assignments are within their validity
+        // window at the compile instant, so a genuine live overlap must still fail with 422.
+        String merchantId = "700013";
+        LimitRule ruleA = repository.addActiveRule("RULE_ACTIVE_WINDOW_A");
+        LimitRule ruleB = repository.addActiveRule("RULE_ACTIVE_WINDOW_B");
+        UUID groupA = UUID.randomUUID();
+        UUID groupB = UUID.randomUUID();
+        repository.addAssignment(ruleA.id(), ruleA.code(), AssignmentOwnerType.MERCHANT_GROUP,
+                groupA.toString(), LimitMode.LIMITED,
+                Instant.parse("2026-05-01T00:00:00Z"), Instant.parse("2026-12-31T00:00:00Z"));
+        repository.addAssignment(ruleB.id(), ruleB.code(), AssignmentOwnerType.MERCHANT_GROUP,
+                groupB.toString(), LimitMode.LIMITED);
+        repository.addMembership(merchantId, groupA);
+        repository.addMembership(merchantId, groupB);
+
+        assertThatThrownBy(() -> compiler.compile(Instant.parse("2026-05-29T10:15:00Z")))
+                .isInstanceOf(LimitKindConflictException.class)
+                .satisfies(ex -> assertThat(((LimitKindConflictException) ex).compilation()).isTrue());
+
+        assertThat(repository.manifests).isEmpty();
+    }
+
+    @Test
     void compilesWhenConflictingKindsAreConfinedToASingleGroup() {
         // Same conflicting kinds but both assignments target the SAME group the merchant belongs to:
         // the invariant is about kinds arriving from DIFFERENT groups, so this compiles normally.
@@ -521,6 +575,19 @@ class RuntimeManifestCompilerTest {
                 String ownerId,
                 LimitMode mode
         ) {
+            return addAssignment(ruleId, ruleCode, ownerType, ownerId, mode,
+                    Instant.parse("2026-05-29T00:00:00Z"), null);
+        }
+
+        RuntimeCompiledAssignment addAssignment(
+                UUID ruleId,
+                String ruleCode,
+                AssignmentOwnerType ownerType,
+                String ownerId,
+                LimitMode mode,
+                Instant validFrom,
+                Instant validTo
+        ) {
             RuntimeCompiledAssignment assignment = new RuntimeCompiledAssignment(
                     UUID.randomUUID(),
                     ruleId,
@@ -528,8 +595,8 @@ class RuntimeManifestCompilerTest {
                     ownerType,
                     ownerId,
                     mode,
-                    Instant.parse("2026-05-29T00:00:00Z"),
-                    null
+                    validFrom,
+                    validTo
             );
             assignments.add(assignment);
             return assignment;

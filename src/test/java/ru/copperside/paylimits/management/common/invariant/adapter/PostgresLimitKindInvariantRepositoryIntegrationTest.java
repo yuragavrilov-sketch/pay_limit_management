@@ -81,7 +81,7 @@ class PostgresLimitKindInvariantRepositoryIntegrationTest {
                 LimitTargetType.PHONE, OperationDirection.IN, "ACTIVE", Set.of("SBP_C2B"));
         insertAssignment(merchantOwnedRule, "MERCHANT", "502118", true);
 
-        List<LimitKind> kinds = repository.kindsDeliveredByGroup(groupId);
+        List<LimitKind> kinds = repository.kindsDeliveredByGroup(groupId, NOW);
 
         assertThat(kinds).containsExactly(
                 new LimitKind(RuleMetric.COUNT, RulePeriod.DAY, LimitTargetType.PHONE, OperationDirection.IN, Set.of("SBP_C2B")));
@@ -155,7 +155,89 @@ class PostgresLimitKindInvariantRepositoryIntegrationTest {
         insertAssignment(rule, "MERCHANT_GROUP", disabledGroup.toString(), false);
         insertAssignment(rule, "MERCHANT", "502118", true);
 
-        assertThat(repository.groupsWithEnabledAssignmentForRule(rule)).containsExactly(enabledGroup);
+        assertThat(repository.groupsWithEnabledAssignmentForRule(rule, NOW)).containsExactly(enabledGroup);
+    }
+
+    // ---- Finding #2: an assignment's own validity window is honoured at the check instant ----
+
+    @Test
+    void kindsDeliveredByGroupExcludesExpiredButEnabledAssignmentsAndFutureOnesAtTheCheckInstant() {
+        UUID typeId = insertGroupType();
+        UUID groupId = insertGroup(typeId);
+
+        // Active window (valid_from in the past, open-ended): delivered.
+        UUID activeRule = insertRule("RULE_WINDOW_ACTIVE", RuleMetric.COUNT, RulePeriod.DAY,
+                LimitTargetType.PHONE, OperationDirection.IN, "ACTIVE", Set.of("SBP_C2B"));
+        insertAssignmentWithWindow(activeRule, groupId.toString(), true, NOW.minusSeconds(86400), null);
+
+        // Expired-but-enabled (valid_to in the past): NOT delivered at NOW.
+        UUID expiredRule = insertRule("RULE_WINDOW_EXPIRED", RuleMetric.AMOUNT, RulePeriod.MONTH,
+                LimitTargetType.ACCOUNT, OperationDirection.OUT, "ACTIVE", Set.of("SBP_B2C"));
+        insertAssignmentWithWindow(expiredRule, groupId.toString(), true,
+                NOW.minusSeconds(10 * 86400), NOW.minusSeconds(86400));
+
+        // Future-dated (valid_from after NOW): NOT delivered at NOW, but delivered inside its window.
+        UUID futureRule = insertRule("RULE_WINDOW_FUTURE", RuleMetric.COUNT, RulePeriod.WEEK,
+                LimitTargetType.CARD, OperationDirection.IN, "ACTIVE", Set.of("SBP_C2B"));
+        insertAssignmentWithWindow(futureRule, groupId.toString(), true, NOW.plusSeconds(86400), null);
+
+        LimitKind activeKind = new LimitKind(RuleMetric.COUNT, RulePeriod.DAY, LimitTargetType.PHONE,
+                OperationDirection.IN, Set.of("SBP_C2B"));
+        LimitKind futureKind = new LimitKind(RuleMetric.COUNT, RulePeriod.WEEK, LimitTargetType.CARD,
+                OperationDirection.IN, Set.of("SBP_C2B"));
+
+        assertThat(repository.kindsDeliveredByGroup(groupId, NOW)).containsExactly(activeKind);
+        // Inside the future assignment's window both the active and the future assignment deliver.
+        assertThat(repository.kindsDeliveredByGroup(groupId, NOW.plusSeconds(2 * 86400)))
+                .containsExactlyInAnyOrder(activeKind, futureKind);
+    }
+
+    @Test
+    void kindsReceivedByMerchantExcludingGroupExcludesExpiredButEnabledAssignments() {
+        UUID liveType = insertGroupType();
+        UUID expiredType = insertGroupType();
+        UUID excludedType = insertGroupType();
+        UUID liveGroup = insertGroup(liveType);
+        UUID expiredGroup = insertGroup(expiredType);
+        UUID excludedGroup = insertGroup(excludedType);
+        String merchantId = "502130";
+
+        UUID liveRule = insertRule("RULE_RECV_LIVE", RuleMetric.AMOUNT, RulePeriod.MONTH,
+                LimitTargetType.ACCOUNT, OperationDirection.OUT, "ACTIVE", Set.of("SBP_B2C"));
+        insertAssignmentWithWindow(liveRule, liveGroup.toString(), true, NOW.minusSeconds(86400), null);
+
+        UUID expiredRule = insertRule("RULE_RECV_EXPIRED", RuleMetric.COUNT, RulePeriod.DAY,
+                LimitTargetType.PHONE, OperationDirection.IN, "ACTIVE", Set.of("SBP_C2B"));
+        insertAssignmentWithWindow(expiredRule, expiredGroup.toString(), true,
+                NOW.minusSeconds(10 * 86400), NOW.minusSeconds(86400));
+
+        insertMembership(merchantId, liveGroup, liveType, NOW.minusSeconds(86400), null);
+        insertMembership(merchantId, expiredGroup, expiredType, NOW.minusSeconds(86400), null);
+
+        // Only the live group's kind is received; the expired assignment is filtered out at NOW.
+        assertThat(repository.kindsReceivedByMerchantExcludingGroup(merchantId, excludedGroup, NOW))
+                .containsExactly(new MerchantGroupKind(liveGroup,
+                        new LimitKind(RuleMetric.AMOUNT, RulePeriod.MONTH, LimitTargetType.ACCOUNT,
+                                OperationDirection.OUT, Set.of("SBP_B2C"))));
+    }
+
+    @Test
+    void groupsWithEnabledAssignmentForRuleExcludesExpiredButEnabledAndFutureAssignmentsAtTheCheckInstant() {
+        UUID typeId = insertGroupType();
+        UUID liveGroup = insertGroup(typeId);
+        UUID expiredGroup = insertGroup(typeId);
+        UUID futureGroup = insertGroup(typeId);
+
+        UUID rule = insertRule("RULE_ASSIGN_WINDOW", RuleMetric.COUNT, RulePeriod.DAY,
+                LimitTargetType.PHONE, OperationDirection.IN, "ACTIVE", Set.of("SBP_C2B"));
+        insertAssignmentWithWindow(rule, liveGroup.toString(), true, NOW.minusSeconds(86400), null);
+        insertAssignmentWithWindow(rule, expiredGroup.toString(), true,
+                NOW.minusSeconds(10 * 86400), NOW.minusSeconds(86400));
+        insertAssignmentWithWindow(rule, futureGroup.toString(), true, NOW.plusSeconds(86400), null);
+
+        assertThat(repository.groupsWithEnabledAssignmentForRule(rule, NOW)).containsExactly(liveGroup);
+        assertThat(repository.groupsWithEnabledAssignmentForRule(rule, NOW.plusSeconds(2 * 86400)))
+                .containsExactlyInAnyOrder(liveGroup, futureGroup);
     }
 
     @Test
@@ -256,6 +338,16 @@ class PostgresLimitKindInvariantRepositoryIntegrationTest {
                     (id, rule_id, owner_type, owner_id, limit_mode, valid_from, valid_to, enabled, created_at, updated_at)
                 values (?, ?, ?, ?, 'UNLIMITED', ?, null, ?, ?, ?)
                 """, UUID.randomUUID(), ruleId, ownerType, ownerId, Timestamp.from(NOW.minusSeconds(86400)), enabled,
+                Timestamp.from(NOW), Timestamp.from(NOW));
+    }
+
+    private void insertAssignmentWithWindow(UUID ruleId, String ownerId, boolean enabled, Instant validFrom, Instant validTo) {
+        jdbcTemplate.update("""
+                insert into limit_management.limit_assignments
+                    (id, rule_id, owner_type, owner_id, limit_mode, valid_from, valid_to, enabled, created_at, updated_at)
+                values (?, ?, 'MERCHANT_GROUP', ?, 'UNLIMITED', ?, ?, ?, ?, ?)
+                """, UUID.randomUUID(), ruleId, ownerId,
+                Timestamp.from(validFrom), validTo == null ? null : Timestamp.from(validTo), enabled,
                 Timestamp.from(NOW), Timestamp.from(NOW));
     }
 }

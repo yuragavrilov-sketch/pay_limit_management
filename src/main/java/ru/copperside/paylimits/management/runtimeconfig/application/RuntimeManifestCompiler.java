@@ -274,9 +274,15 @@ public class RuntimeManifestCompiler {
      * ({@code validTo == null || validTo.isAfter(compileInstant)}) participate in the scan, mirroring
      * the interactive membership check (which filters {@code valid_to > now}). CLOSED/historical
      * memberships are excluded here so a merchant's past membership in one group and current
-     * membership in another delivering the same kind is not treated as a simultaneous overlap. This
-     * filtering affects the invariant scan ONLY — the manifest payload (and therefore its checksum)
-     * still carries every membership row returned for compilation, unchanged.
+     * membership in another delivering the same kind is not treated as a simultaneous overlap.
+     *
+     * <p>The same temporal rule applies to group ASSIGNMENTS: only assignments whose validity window
+     * contains {@code compileInstant} ({@code validFrom <= compileInstant &&
+     * (validTo == null || validTo.isAfter(compileInstant))}) deliver their kind, mirroring the
+     * interactive checks' assignment-window filter. An expired-but-enabled assignment is therefore
+     * ignored by the scan. This filtering affects the invariant scan ONLY — the manifest payload (and
+     * therefore its checksum) still carries every membership and assignment row returned for
+     * compilation, unchanged (engine performs its own temporal selection over the full periods).
      */
     private void checkSnapshotInvariant(
             List<LimitRule> activeRules,
@@ -290,6 +296,7 @@ public class RuntimeManifestCompiler {
         }
         List<SnapshotGroupAssignment> groupAssignments = assignments.stream()
                 .filter(assignment -> assignment.ownerType() == AssignmentOwnerType.MERCHANT_GROUP)
+                .filter(assignment -> isInEffect(assignment, compileInstant))
                 .map(assignment -> new SnapshotGroupAssignment(
                         UUID.fromString(assignment.ownerId()), assignment.ruleId()))
                 .toList();
@@ -302,6 +309,16 @@ public class RuntimeManifestCompiler {
         if (!conflicts.isEmpty()) {
             throw new LimitKindConflictException(conflicts, true);
         }
+    }
+
+    /**
+     * Whether an assignment's validity window contains {@code at}, i.e. it is actually in effect at
+     * that instant. {@code validFrom} is non-null for a compiled assignment; a null {@code validTo}
+     * means open-ended.
+     */
+    private static boolean isInEffect(RuntimeCompiledAssignment assignment, Instant at) {
+        return !assignment.validFrom().isAfter(at)
+                && (assignment.validTo() == null || assignment.validTo().isAfter(at));
     }
 
     private RuntimeManifest buildRollbackManifest(

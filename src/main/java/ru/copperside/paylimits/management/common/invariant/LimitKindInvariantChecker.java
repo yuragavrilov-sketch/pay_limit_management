@@ -49,7 +49,7 @@ public class LimitKindInvariantChecker {
      */
     public void checkMembership(String merchantId, UUID requestedGroupId, Instant at) {
         repository.lockMerchant(merchantId);
-        List<LimitKind> delivered = repository.kindsDeliveredByGroup(requestedGroupId);
+        List<LimitKind> delivered = repository.kindsDeliveredByGroup(requestedGroupId, at);
         if (delivered.isEmpty()) {
             return;
         }
@@ -78,7 +78,7 @@ public class LimitKindInvariantChecker {
      */
     public void checkMembershipUnderLock(
             String merchantId, UUID requestedGroupId, Collection<UUID> alsoExcludedGroupIds, Instant at) {
-        List<LimitKind> delivered = repository.kindsDeliveredByGroup(requestedGroupId);
+        List<LimitKind> delivered = repository.kindsDeliveredByGroup(requestedGroupId, at);
         if (delivered.isEmpty()) {
             return;
         }
@@ -134,7 +134,7 @@ public class LimitKindInvariantChecker {
             return;
         }
         List<LimitKindConflict> conflicts = new ArrayList<>();
-        for (UUID groupId : repository.groupsWithEnabledAssignmentForRule(ruleId)) {
+        for (UUID groupId : repository.groupsWithEnabledAssignmentForRule(ruleId, at)) {
             conflicts.addAll(collectGroupConflicts(ruleKind.get(), groupId, at));
         }
         throwIfConflicting(conflicts);

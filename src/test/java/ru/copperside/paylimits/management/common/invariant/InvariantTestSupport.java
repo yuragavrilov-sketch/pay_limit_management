@@ -47,7 +47,7 @@ public final class InvariantTestSupport {
         }
 
         @Override
-        public List<LimitKind> kindsDeliveredByGroup(java.util.UUID groupId) {
+        public List<LimitKind> kindsDeliveredByGroup(java.util.UUID groupId, Instant at) {
             return List.of();
         }
 
@@ -69,7 +69,7 @@ public final class InvariantTestSupport {
         }
 
         @Override
-        public List<java.util.UUID> groupsWithEnabledAssignmentForRule(java.util.UUID ruleId) {
+        public List<java.util.UUID> groupsWithEnabledAssignmentForRule(java.util.UUID ruleId, Instant at) {
             return List.of();
         }
 

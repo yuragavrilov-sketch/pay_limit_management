@@ -315,6 +315,58 @@ class LimitKindInvariantIntegrationTest {
                 .andExpect(jsonPath("$.error.conflicts[0].requestedGroupId").value(groupG.toString()));
     }
 
+    // ---- Finding #2 regression: an expired-but-enabled assignment no longer delivers its kind, so a
+    // membership whose only "conflict" is with such a stale assignment must SUCCEED; a genuinely
+    // in-window conflicting assignment must still 409. ----
+
+    @Test
+    void addingMembershipConflictingOnlyWithAnExpiredAssignmentIsAllowedButALiveOneStill409s() throws Exception {
+        String merchantId = "990022";
+        UUID typeA = insertGroupType();
+        UUID typeB = insertGroupType();
+        UUID groupG = insertGroup(typeA); // requested
+        UUID groupH = insertGroup(typeB); // delivers the same kind, but its assignment has EXPIRED
+
+        UUID ruleG = insertRule("MGT_EXP_G", RuleMetric.COUNT, RulePeriod.DAY, LimitTargetType.PHONE,
+                OperationDirection.IN, "ACTIVE", Set.of("SBP_C2B"));
+        insertAssignment(ruleG, "MERCHANT_GROUP", groupG.toString(), true);
+        UUID ruleH = insertRule("MGT_EXP_H", RuleMetric.COUNT, RulePeriod.DAY, LimitTargetType.PHONE,
+                OperationDirection.IN, "ACTIVE", Set.of("SBP_C2B"));
+        // Expired well before the new membership's validFrom (2025-01-01): no live overlap.
+        insertAssignmentWithWindow(ruleH, groupH.toString(), true,
+                Instant.parse("2023-01-01T00:00:00Z"), Instant.parse("2024-01-01T00:00:00Z"));
+
+        insertMembership(merchantId, groupH, typeB, PAST, null);
+
+        mockMvc.perform(post("/internal/v1/limit-management/merchant-group-memberships")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                { "merchantId": "%s", "groupId": "%s", "validFrom": "2025-01-01T00:00:00Z" }
+                                """.formatted(merchantId, groupG)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.merchantId").value(merchantId))
+                .andExpect(jsonPath("$.error").doesNotExist());
+
+        // Same merchant, a DIFFERENT-type group delivering the same kind via a LIVE (open-ended)
+        // assignment is a genuine overlap and must still 409 — the fix does not weaken detection.
+        UUID typeC = insertGroupType();
+        UUID groupJ = insertGroup(typeC);
+        UUID ruleJ = insertRule("MGT_EXP_J", RuleMetric.COUNT, RulePeriod.DAY, LimitTargetType.PHONE,
+                OperationDirection.IN, "ACTIVE", Set.of("SBP_C2B"));
+        insertAssignment(ruleJ, "MERCHANT_GROUP", groupJ.toString(), true);
+
+        mockMvc.perform(post("/internal/v1/limit-management/merchant-group-memberships")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                { "merchantId": "%s", "groupId": "%s", "validFrom": "2025-06-01T00:00:00Z" }
+                                """.formatted(merchantId, groupJ)))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.error.code").value("LIMIT_KIND_CONFLICT"))
+                .andExpect(jsonPath("$.error.conflicts[0].merchantId").value(merchantId))
+                .andExpect(jsonPath("$.error.conflicts[0].existingGroupId").value(groupG.toString()))
+                .andExpect(jsonPath("$.error.conflicts[0].requestedGroupId").value(groupJ.toString()));
+    }
+
     // ---- seed helpers (mirror PostgresLimitKindInvariantRepositoryIntegrationTest) ----
 
     private UUID insertGroupType() {
@@ -390,5 +442,14 @@ class LimitKindInvariantIntegrationTest {
                     (id, rule_id, owner_type, owner_id, limit_mode, valid_from, valid_to, enabled, created_at, updated_at)
                 values (?, ?, ?, ?, 'UNLIMITED', ?, null, ?, now(), now())
                 """, UUID.randomUUID(), ruleId, ownerType, ownerId, Timestamp.from(PAST), enabled);
+    }
+
+    private void insertAssignmentWithWindow(UUID ruleId, String ownerId, boolean enabled, Instant validFrom, Instant validTo) {
+        jdbcTemplate.update("""
+                insert into limit_management.limit_assignments
+                    (id, rule_id, owner_type, owner_id, limit_mode, valid_from, valid_to, enabled, created_at, updated_at)
+                values (?, ?, 'MERCHANT_GROUP', ?, 'UNLIMITED', ?, ?, ?, now(), now())
+                """, UUID.randomUUID(), ruleId, ownerId,
+                Timestamp.from(validFrom), validTo == null ? null : Timestamp.from(validTo), enabled);
     }
 }

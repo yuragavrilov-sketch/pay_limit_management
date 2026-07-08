@@ -47,7 +47,7 @@ class LimitKindInvariantCheckerTest {
         String merchantId = "502118";
         UUID requestedGroup = UUID.randomUUID();
         UUID otherGroup = UUID.randomUUID();
-        when(repository.kindsDeliveredByGroup(requestedGroup)).thenReturn(List.of(COUNT_DAY_PHONE_IN));
+        when(repository.kindsDeliveredByGroup(requestedGroup, AT)).thenReturn(List.of(COUNT_DAY_PHONE_IN));
         when(repository.kindsReceivedByMerchantExcludingGroup(merchantId, requestedGroup, AT))
                 .thenReturn(List.of(new MerchantGroupKind(otherGroup, COUNT_DAY_PHONE_IN)));
 
@@ -70,7 +70,7 @@ class LimitKindInvariantCheckerTest {
         String merchantId = "502118";
         UUID requestedGroup = UUID.randomUUID();
         UUID otherGroup = UUID.randomUUID();
-        when(repository.kindsDeliveredByGroup(requestedGroup)).thenReturn(List.of(COUNT_DAY_PHONE_IN));
+        when(repository.kindsDeliveredByGroup(requestedGroup, AT)).thenReturn(List.of(COUNT_DAY_PHONE_IN));
         when(repository.kindsReceivedByMerchantExcludingGroup(merchantId, requestedGroup, AT))
                 .thenReturn(List.of(new MerchantGroupKind(otherGroup, DISJOINT_AMOUNT_MONTH)));
 
@@ -82,7 +82,7 @@ class LimitKindInvariantCheckerTest {
     void membershipShortCircuitsWhenGroupDeliversNoKinds() {
         String merchantId = "502118";
         UUID requestedGroup = UUID.randomUUID();
-        when(repository.kindsDeliveredByGroup(requestedGroup)).thenReturn(List.of());
+        when(repository.kindsDeliveredByGroup(requestedGroup, AT)).thenReturn(List.of());
 
         assertThatCode(() -> checker.checkMembership(merchantId, requestedGroup, AT)).doesNotThrowAnyException();
         verify(repository).lockMerchant(merchantId);
@@ -143,7 +143,7 @@ class LimitKindInvariantCheckerTest {
         UUID assignedGroup = UUID.randomUUID();
         UUID otherGroup = UUID.randomUUID();
         when(repository.kindOfRule(ruleId)).thenReturn(Optional.of(COUNT_DAY_PHONE_IN));
-        when(repository.groupsWithEnabledAssignmentForRule(ruleId)).thenReturn(List.of(assignedGroup));
+        when(repository.groupsWithEnabledAssignmentForRule(ruleId, AT)).thenReturn(List.of(assignedGroup));
         when(repository.membersOfGroup(assignedGroup, AT)).thenReturn(List.of("502118"));
         when(repository.kindsReceivedByMerchantExcludingGroup("502118", assignedGroup, AT))
                 .thenReturn(List.of(new MerchantGroupKind(otherGroup, COUNT_DAY_PHONE_IN)));
@@ -157,7 +157,7 @@ class LimitKindInvariantCheckerTest {
     void ruleActivationWithoutGroupAssignmentsDoesNotThrow() {
         UUID ruleId = UUID.randomUUID();
         when(repository.kindOfRule(ruleId)).thenReturn(Optional.of(COUNT_DAY_PHONE_IN));
-        when(repository.groupsWithEnabledAssignmentForRule(ruleId)).thenReturn(List.of());
+        when(repository.groupsWithEnabledAssignmentForRule(ruleId, AT)).thenReturn(List.of());
 
         assertThatCode(() -> checker.checkRuleActivation(ruleId, AT)).doesNotThrowAnyException();
         verify(repository).lockRule(ruleId);
