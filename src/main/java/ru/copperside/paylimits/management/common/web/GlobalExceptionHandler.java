@@ -108,6 +108,9 @@ public class GlobalExceptionHandler {
         HttpStatus status = switch (ex.code()) {
             case "RUNTIME_MANIFEST_NOT_FOUND" -> HttpStatus.NOT_FOUND;
             case "VALIDATION_ERROR", "RUNTIME_MANIFEST_LEAD_TIME_VIOLATION" -> HttpStatus.BAD_REQUEST;
+            // A rule that can't be compiled into a valid manifest is a compile-time config rejection,
+            // consistent with the 422 returned for the compile-time limit-kind invariant conflict.
+            case "RUNTIME_MANIFEST_INVALID_RULE" -> HttpStatus.UNPROCESSABLE_ENTITY;
             default -> HttpStatus.CONFLICT;
         };
         return problem(status, ex.code(), titleForRuntimeManifestProblem(ex.code()), messageWithoutCode(ex), ex.details());
@@ -183,6 +186,7 @@ public class GlobalExceptionHandler {
     private String titleForRuntimeManifestProblem(String code) {
         return switch (code) {
             case "RUNTIME_MANIFEST_CONFLICT" -> "Runtime manifest conflict";
+            case "RUNTIME_MANIFEST_INVALID_RULE" -> "Runtime manifest invalid rule";
             case "RUNTIME_MANIFEST_LEAD_TIME_VIOLATION" -> "Runtime manifest lead time violation";
             case "RUNTIME_MANIFEST_NOT_FOUND" -> "Runtime manifest not found";
             default -> "Runtime manifest problem";
