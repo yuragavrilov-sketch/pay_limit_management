@@ -46,7 +46,9 @@ public interface LimitKindInvariantRepository {
     /**
      * For every group (other than {@code excludedGroupId}) the merchant is a current-or-future
      * member of as of {@code at}, the {@link LimitKind}s that group delivers, each tagged with
-     * its group id.
+     * its group id. Only enabled group assignments of ACTIVE rules whose own validity window
+     * contains {@code at} ({@code valid_from <= at and (valid_to is null or valid_to > at)}) are
+     * considered — an expired-but-enabled assignment no longer delivers its kind.
      */
     List<MerchantGroupKind> kindsReceivedByMerchantExcludingGroup(String merchantId, UUID excludedGroupId, Instant at);
 
