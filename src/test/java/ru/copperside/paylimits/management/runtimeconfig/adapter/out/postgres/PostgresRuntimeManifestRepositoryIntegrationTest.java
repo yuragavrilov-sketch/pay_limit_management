@@ -6,6 +6,8 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.support.TransactionTemplate;
 import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
@@ -26,6 +28,7 @@ import ru.copperside.paylimits.management.runtimeconfig.domain.RuntimeCompiledRu
 import ru.copperside.paylimits.management.runtimeconfig.domain.RuntimeManifest;
 import ru.copperside.paylimits.management.runtimeconfig.domain.RuntimeManifestDescriptor;
 import ru.copperside.paylimits.management.runtimeconfig.domain.RuntimeManifestPayload;
+import ru.copperside.paylimits.management.runtimeconfig.domain.RuntimeManifestProblemException;
 import ru.copperside.paylimits.management.runtimeconfig.domain.RuntimeManifestStatus;
 import ru.copperside.paylimits.management.runtimeconfig.domain.RuntimeMerchantGroupMembership;
 import ru.copperside.paylimits.management.runtimeconfig.domain.RuntimeOperationType;
@@ -39,6 +42,7 @@ import java.util.Optional;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 @SpringBootTest
 @Testcontainers
@@ -65,6 +69,9 @@ class PostgresRuntimeManifestRepositoryIntegrationTest {
     @Autowired
     private PostgresRuntimeManifestRepository repository;
 
+    @Autowired
+    private PlatformTransactionManager transactionManager;
+
     @Test
     void savesManifestAndPayloadRows() {
         SnapshotIds ids = insertSnapshot("SAVE");
@@ -86,6 +93,79 @@ class PostgresRuntimeManifestRepositoryIntegrationTest {
         // computed before the DB round-trip (already covered by the `contains(manifest)` equality
         // above). This pins that the read-back payload itself hashes to the stored checksum.
         assertThat(canonicalJson.checksum(readBack.payload())).isEqualTo(readBack.checksum());
+    }
+
+    // Task 2 (F1): if the payload_json this transaction just wrote does not round-trip to the same
+    // document the checksum was built from (simulated here via a repository subclass whose read-back
+    // hook returns a tampered payload instead of hitting the DB a second time), saveCompiledManifest
+    // must fail closed with RUNTIME_MANIFEST_CHECKSUM_DRIFT and roll back -- no manifest row, and no
+    // child rows, may survive.
+    @Test
+    void writeTimeVerificationCatchesReadBackDriftAndRollsBackTheWholeInsert() {
+        SnapshotIds ids = insertSnapshot("DRIFT");
+        long manifestsBefore = countRows("runtime_manifests");
+        long ruleRowsBefore = countRows("runtime_manifest_rules");
+        TamperingRepository tamperingRepository = new TamperingRepository(jdbcTemplate);
+        TransactionTemplate transactionTemplate = new TransactionTemplate(transactionManager);
+
+        assertThatThrownBy(() -> transactionTemplate.execute(status -> tamperingRepository.saveCompiledManifest(
+                version -> manifest(
+                        version,
+                        ids,
+                        Instant.parse("2026-05-29T10:00:00Z"),
+                        Instant.parse("2026-05-29T10:15:00Z")))))
+                .isInstanceOf(RuntimeManifestProblemException.class)
+                .hasMessageContaining("RUNTIME_MANIFEST_CHECKSUM_DRIFT");
+
+        assertThat(countRows("runtime_manifests")).isEqualTo(manifestsBefore);
+        assertThat(countRows("runtime_manifest_rules")).isEqualTo(ruleRowsBefore);
+    }
+
+    // Task 2 (F1/E4): the fail-closed comparison itself, exercised directly with a mismatching pair --
+    // covers the branch even if simulating a real jsonb round-trip drift end-to-end were ever hard to
+    // keep deterministic.
+    @Test
+    void assertChecksumMatchesThrowsDriftProblemOnMismatchAndPassesOnMatch() {
+        assertThatThrownBy(() -> PostgresRuntimeManifestRepository.assertChecksumMatches("sha256:a", "sha256:b"))
+                .isInstanceOf(RuntimeManifestProblemException.class)
+                .hasMessageContaining("RUNTIME_MANIFEST_CHECKSUM_DRIFT");
+
+        // No exception for a matching pair.
+        PostgresRuntimeManifestRepository.assertChecksumMatches("sha256:same", "sha256:same");
+    }
+
+    private long countRows(String tableName) {
+        return jdbcTemplate.queryForObject(
+                "select count(*) from limit_management.%s".formatted(tableName), Long.class);
+    }
+
+    /** Overrides the write-time read-back hook to return a tampered payload, simulating jsonb round-trip drift. */
+    private static final class TamperingRepository extends PostgresRuntimeManifestRepository {
+
+        TamperingRepository(JdbcTemplate jdbcTemplate) {
+            super(jdbcTemplate);
+        }
+
+        @Override
+        RuntimeManifestPayload readBackPayloadForVerification(UUID manifestId) {
+            RuntimeManifestPayload actual = super.readBackPayloadForVerification(manifestId);
+            return new RuntimeManifestPayload(
+                    actual.schemaVersion(),
+                    "Europe/Samara", // tampered: differs from the "Europe/Moscow" the checksum was built over
+                    actual.operationTypes(),
+                    actual.version(),
+                    actual.status(),
+                    actual.createdAt(),
+                    actual.effectiveFrom(),
+                    actual.ruleCount(),
+                    actual.assignmentCount(),
+                    actual.membershipCount(),
+                    actual.rules(),
+                    actual.assignments(),
+                    actual.memberships(),
+                    actual.diagnostics()
+            );
+        }
     }
 
     @Test

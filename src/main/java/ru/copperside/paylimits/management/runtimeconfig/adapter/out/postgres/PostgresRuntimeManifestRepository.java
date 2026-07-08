@@ -197,9 +197,51 @@ public class PostgresRuntimeManifestRepository implements RuntimeManifestReposit
                         """,
                         manifest.id(), membership.membershipId(), position, writeJson(membership));
             }
-            return manifest;
         } catch (DataIntegrityViolationException ex) {
             throw mapIntegrityViolation(ex);
+        }
+        // F1: re-verify, within this same transaction, that what was just persisted actually hashes to
+        // the checksum we are about to publish. This is the ONE integrity read-back per compile — it
+        // catches any jsonb round-trip drift (a field silently dropped/altered by Postgres/Jackson
+        // serialization) between what buildManifest hashed in memory and what a later GET would
+        // reconstruct from payload_json. A mismatch throws and the whole insert above is rolled back
+        // (fail-closed): nothing with a wrong checksum is ever published. Deliberately NOT repeated on
+        // every GET (see mapManifest) -- that would defeat the point of caching the checksum, and this
+        // write-time check already guarantees the stored row is self-consistent for the rest of its life.
+        verifyPersistedChecksum(manifest);
+        return manifest;
+    }
+
+    /**
+     * Reads back the payload_json this transaction just wrote for {@code manifest.id()}, re-projects
+     * it to the engine-facing {@link ru.copperside.paylimits.management.runtimeconfig.domain.wire.ManifestDocumentV2}
+     * and recomputes its checksum, then compares against the checksum {@link #saveCompiledManifest}
+     * is about to publish. Package-private (not {@code private}) so tests can subclass and inject a
+     * tampered read-back to exercise the drift path deterministically.
+     */
+    void verifyPersistedChecksum(RuntimeManifest manifest) {
+        RuntimeManifestPayload readBack = readBackPayloadForVerification(manifest.id());
+        String recomputedChecksum = canonicalJson.checksum(readBack);
+        assertChecksumMatches(manifest.checksum(), recomputedChecksum);
+    }
+
+    RuntimeManifestPayload readBackPayloadForVerification(UUID manifestId) {
+        String payloadJson = jdbcTemplate.queryForObject("""
+                select payload_json::text as payload_json
+                from limit_management.runtime_manifests
+                where id = ?
+                """, String.class, manifestId);
+        return readPayload(payloadJson);
+    }
+
+    /**
+     * Pure comparison, extracted so it can be unit-tested with a mismatching pair without a database.
+     */
+    static void assertChecksumMatches(String expectedChecksum, String recomputedChecksum) {
+        if (!Objects.equals(expectedChecksum, recomputedChecksum)) {
+            throw new RuntimeManifestProblemException(
+                    "RUNTIME_MANIFEST_CHECKSUM_DRIFT",
+                    "Persisted runtime manifest document checksum does not match the checksum computed at compile time");
         }
     }
 
@@ -276,6 +318,18 @@ public class PostgresRuntimeManifestRepository implements RuntimeManifestReposit
         return Optional.ofNullable(latest).map(Timestamp::toInstant);
     }
 
+    /**
+     * Structural self-check on the just-built {@link RuntimeManifest}/{@link RuntimeManifestPayload}
+     * pair (both views of the SAME in-memory object the factory just produced) -- catches a
+     * {@code CompiledRuntimeManifestFactory} that populated the two mismatched, e.g. a bug that lets
+     * the top-level convenience fields drift from the nested payload. This is NOT a checksum
+     * computation and does not touch {@link RuntimeManifestCanonicalJson}: the ONE authoritative
+     * canonical checksum for a compile is the one {@code RuntimeManifestCompiler.buildManifest}/
+     * {@code buildRollbackManifest} computes when constructing the manifest; re-asserting it here
+     * against the SAME in-memory payload would only prove Java equality is reflexive. Integrity against
+     * drift is instead verified once, after persistence, by {@link #verifyPersistedChecksum} against
+     * the read-back payload_json -- a strictly stronger check than re-hashing the same object twice.
+     */
     private void validateManifest(RuntimeManifest manifest) {
         if (manifest == null || manifest.payload() == null) {
             throw new IllegalArgumentException("Runtime manifest payload must be present");
@@ -305,10 +359,6 @@ public class PostgresRuntimeManifestRepository implements RuntimeManifestReposit
                 || !Objects.equals(manifest.memberships(), payload.memberships())
                 || !Objects.equals(manifest.diagnostics(), payload.diagnostics())) {
             throw new IllegalArgumentException("Runtime manifest payload does not match top-level fields");
-        }
-        String expectedChecksum = canonicalJson.checksum(payload);
-        if (!Objects.equals(manifest.checksum(), expectedChecksum)) {
-            throw new IllegalArgumentException("Runtime manifest checksum does not match payload");
         }
     }
 

@@ -111,6 +111,11 @@ public class GlobalExceptionHandler {
             // A rule that can't be compiled into a valid manifest is a compile-time config rejection,
             // consistent with the 422 returned for the compile-time limit-kind invariant conflict.
             case "RUNTIME_MANIFEST_INVALID_RULE" -> HttpStatus.UNPROCESSABLE_ENTITY;
+            // Not a client-input problem: the write-time read-back (F1) found that the persisted
+            // document no longer hashes to the checksum computed at compile time (jsonb round-trip
+            // drift). The transaction has already been rolled back; surface this as an internal
+            // integrity failure, not a 4xx the caller could "fix" by resubmitting differently.
+            case "RUNTIME_MANIFEST_CHECKSUM_DRIFT" -> HttpStatus.INTERNAL_SERVER_ERROR;
             default -> HttpStatus.CONFLICT;
         };
         return problem(status, ex.code(), titleForRuntimeManifestProblem(ex.code()), messageWithoutCode(ex), ex.details());
@@ -185,6 +190,7 @@ public class GlobalExceptionHandler {
 
     private String titleForRuntimeManifestProblem(String code) {
         return switch (code) {
+            case "RUNTIME_MANIFEST_CHECKSUM_DRIFT" -> "Runtime manifest checksum drift";
             case "RUNTIME_MANIFEST_CONFLICT" -> "Runtime manifest conflict";
             case "RUNTIME_MANIFEST_INVALID_RULE" -> "Runtime manifest invalid rule";
             case "RUNTIME_MANIFEST_LEAD_TIME_VIOLATION" -> "Runtime manifest lead time violation";
