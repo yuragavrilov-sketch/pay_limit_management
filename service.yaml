@@ -24,6 +24,8 @@ environments:
       SERVER_PORT: "8080"
       PAY_ENVIRONMENT: "test"
       SPRING_PROFILES_ACTIVE: "test"
+      PAY_LIMIT_MANAGEMENT_DB_URL: "jdbc:postgresql://postgres:5432/pay_admin?currentSchema=limit_management"
+      PAY_LIMIT_MANAGEMENT_DB_USERNAME: "pay_admin"
       CONFIG_SERVER_ENABLED: "true"
       CONFIG_SERVER_URL: "http://payconfig-server:8080"
       CONFIG_CLIENT_USERNAME: "configadmin"
