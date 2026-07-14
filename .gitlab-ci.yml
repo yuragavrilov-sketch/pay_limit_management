@@ -1,27 +1,10 @@
-variables:
-  SPRING_PROFILES_ACTIVE: "test"
-  NAMESPACE: "pay-service"
-  NAMESPACE_TEST: "test"
-  CHART_REPO: "https://harbor.online.tkbbank.ru/chartrepo/kubernetes"
-  CHART_NAME: "kubernetes/java"
-  CHART_VERSION: "0.4.0"
-  RELEASE_NAME: "pay-limit-management"
+default:
+  tags:
+    - tkbpay
+    - gitrun01
 
 include:
-  - project: tkbpay/microservices/template
-    file: .gitlab-ci-java-21-withcert.yml
-
-helm_deploy_test:
-  extends: .docker_runner
-  stage: helm_deploy
-  variables:
-    IMAGE_NAME: $IMAGE_REGISTRY/$IMAGE_REGISTRY_PROJECT/$CI_PROJECT_NAME
-    IMAGE_TAG: $REVISION-$CI_COMMIT_SHORT_SHA
-    ENV: test
-  script:
-    - K8S_CONFIG=K8S_CONFIG_${ENV}
-    - chmod 0400 $(echo "${!K8S_CONFIG}")
-    - export KUBECONFIG=$(echo "${!K8S_CONFIG}")
-    - helm repo add kubernetes --insecure-skip-tls-verify=true $CHART_REPO
-    - helm upgrade $RELEASE_NAME --install --insecure-skip-tls-verify=true --version=$CHART_VERSION $CHART_NAME --set image.tag=$IMAGE_TAG -f helm/values-$ENV.yaml --namespace=$NAMESPACE_TEST
-  when: manual
+  - component: $CI_SERVER_FQDN/tkbpay/pay/platform/ci-templates/java-spring@1.1.37
+    inputs:
+      with_cert: true
+      image_name: pay-limit-management

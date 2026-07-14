@@ -1,11 +1,9 @@
 FROM harbor.online.tkbbank.ru/custom-base-images/openjre-alpine-musl:21.0.8
-RUN addgroup -S app && adduser -S -G app -h /app app
-RUN apk add --no-cache curl
 
-# Trust the corporate CA chain so HTTPS calls validate (Vault, Postgres TLS, corp endpoints). The CA
-# PEM is placed in certs/ by the CI docker_build (from the $CERT variable). Each file may hold a full
-# chain (root + intermediate) — keytool imports only the FIRST cert from a multi-cert file, so we
-# split and import every certificate. Fail loudly if none was found (e.g. empty $CERT).
+RUN addgroup -S app && adduser -S -G app -h /app app
+RUN apk upgrade --no-cache && apk add --no-cache curl
+RUN rm -f /usr/local/lib/opentelemetry-javaagent.jar
+
 COPY certs/ /usr/local/share/corp-ca/
 RUN set -eu; \
     : "${JAVA_HOME:?JAVA_HOME must be set}"; \
@@ -27,7 +25,7 @@ RUN set -eu; \
         rm -f /tmp/corpca-*.pem; \
     done; \
     echo "Imported $imported corporate CA certificate(s)"; \
-    [ "$imported" -gt 0 ] || { echo "ERROR: no corporate CA certificate found in certs/ (is the CERT CI variable populated in docker_build?)"; exit 1; }
+    [ "$imported" -gt 0 ] || { echo "ERROR: no corporate CA certificate found in certs/"; exit 1; }
 
 WORKDIR /app
 COPY deploy/pay-limit-management-*.jar /app/app.jar

@@ -1,1 +1,4 @@
 target/
+
+# Build artifact (spring-boot repackage outputDirectory)
+deploy/

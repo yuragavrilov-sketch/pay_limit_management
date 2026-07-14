@@ -1,0 +1,40 @@
+name: pay-limit-management
+chart:
+  name: kubernetes/java
+  version: "0.4.0"
+image:
+  pullPolicy: IfNotPresent
+  port: 8080
+serviceAccount:
+  create: true
+  name: pay-limit-management
+imagePullSecrets:
+  enabled: true
+  name: test-adapters-ips
+vault:
+  enabled: false
+environments:
+  test:
+    namespace: test
+    replicas: 1
+    probePath: /actuator/health
+    ingress:
+      enabled: false
+    env:
+      SERVER_PORT: "8080"
+      PAY_ENVIRONMENT: "test"
+      SPRING_PROFILES_ACTIVE: "test"
+      CONFIG_SERVER_ENABLED: "true"
+      CONFIG_SERVER_URL: "http://payconfig-server:8080"
+      CONFIG_CLIENT_USERNAME: "configadmin"
+      CONFIG_CLIENT_PASSWORD:
+        valueFrom:
+          secretKeyRef:
+            name: payconfig-server-secret
+            key: CONFIG_SERVER_PASSWORD
+      VAULT_ENABLED: "true"
+      SPRING_CLOUD_VAULT_URI: "https://vault.online.tkbbank.ru"
+      SPRING_CLOUD_VAULT_AUTHENTICATION: "KUBERNETES"
+      SPRING_CLOUD_VAULT_KUBERNETES_KUBERNETES_PATH: "payadmin-test"
+      SPRING_CLOUD_VAULT_KUBERNETES_ROLE: "pay-limit-management"
+      VAULT_KV_CONTEXTS: "test/pay-limit-management-db-password"
