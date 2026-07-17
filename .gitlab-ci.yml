@@ -4,7 +4,7 @@ default:
     - gitrun01
 
 include:
-  - component: $CI_SERVER_FQDN/tkbpay/pay/platform/ci-templates/java-spring@1.1.39
+  - component: $CI_SERVER_FQDN/tkbpay/pay/platform/ci-templates/java-spring@1.1.40
     inputs:
       with_cert: true
       image_name: pay-limit-management
