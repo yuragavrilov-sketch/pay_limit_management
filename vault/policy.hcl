@@ -1,5 +1,5 @@
 # Vault ACL policy for pay-limit-management.
-# KV v1 mount `pay`, layout pay/{env}/{app}-{secret}.
-path "pay/test/pay-limit-management-*" {
+# KV v2 mount `kv`; metadata is intentionally not granted.
+path "kv/data/test/pay/services/pay-limit-management" {
   capabilities = ["read"]
 }

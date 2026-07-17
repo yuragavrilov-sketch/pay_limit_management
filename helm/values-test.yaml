@@ -61,10 +61,12 @@ extraEnvs:
     value: "kubernetes-test"
   - name: SPRING_CLOUD_VAULT_KUBERNETES_ROLE
     value: "pay-limit-management"
+  - name: VAULT_KV_BACKEND
+    value: "kv"
   # Vault holds the DB password. (No internal-admin-key context: this service does not yet validate
   # X-Internal-Admin-Key in code — add the context here and the property/filter together when it does.)
   - name: VAULT_KV_CONTEXTS
-    value: "test/pay-limit-management-db-password"
+    value: "test/pay/services/pay-limit-management"
   # --- Config Server (payconfig-server, Basic auth) ---
   - name: CONFIG_SERVER_URL
     value: "http://payconfig-server:8080"
@@ -79,4 +81,4 @@ extraEnvs:
   # Non-secret config (datasource url/username, Flyway) comes from Config Server — config-repo branch
   # `test`, file `pay-limit-management/application.yaml`. Not set here.
   # Application secret read from Vault (see VAULT_KV_CONTEXTS):
-  #   pay/test/pay-limit-management-db-password        key spring.datasource.password
+  #   kv/test/pay/services/pay-limit-management        key spring.datasource.password

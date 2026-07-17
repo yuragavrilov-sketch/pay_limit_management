@@ -37,4 +37,5 @@ environments:
       SPRING_CLOUD_VAULT_AUTHENTICATION: "KUBERNETES"
       SPRING_CLOUD_VAULT_KUBERNETES_KUBERNETES_PATH: "kubernetes-test"
       SPRING_CLOUD_VAULT_KUBERNETES_ROLE: "pay-limit-management"
-      VAULT_KV_CONTEXTS: "test/pay-limit-management-db-password"
+      VAULT_KV_BACKEND: "kv"
+      VAULT_KV_CONTEXTS: "test/pay/services/pay-limit-management"
