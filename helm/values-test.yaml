@@ -1,5 +1,5 @@
 image:
-  repository: harbor.online.tkbbank.ru/tkbpay/pay_limit_management   # must equal CI image path ($IMAGE_REGISTRY/$IMAGE_REGISTRY_PROJECT/$CI_PROJECT_NAME); tag injected by CI
+  repository: harbor.online.tkbbank.ru/tkbpay/pay-limit-management
 serviceAccount:
   create: true                   # dedicated SA, bound to the Vault k8s-auth role `pay-limit-management`
   name: pay-limit-management
@@ -58,7 +58,7 @@ extraEnvs:
   - name: SPRING_CLOUD_VAULT_AUTHENTICATION
     value: "KUBERNETES"
   - name: SPRING_CLOUD_VAULT_KUBERNETES_KUBERNETES_PATH
-    value: "payadmin-test"
+    value: "kubernetes-test"
   - name: SPRING_CLOUD_VAULT_KUBERNETES_ROLE
     value: "pay-limit-management"
   # Vault holds the DB password. (No internal-admin-key context: this service does not yet validate
