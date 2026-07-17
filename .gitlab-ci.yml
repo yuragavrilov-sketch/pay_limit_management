@@ -8,3 +8,26 @@ include:
     inputs:
       with_cert: true
       image_name: pay-limit-management
+
+# Kubernetes and Vault delivery are owned by the protected platform project
+# tkbpay/pay/platform/kubernetes-agents. The shared component still defines
+# legacy delivery jobs, so this application explicitly disables them.
+deploy_test:
+  rules:
+    - when: never
+
+deploy_only:
+  rules:
+    - when: never
+
+smoke_test:
+  rules:
+    - when: never
+
+smoke_deploy_only:
+  rules:
+    - when: never
+
+vault_apply:
+  rules:
+    - when: never
